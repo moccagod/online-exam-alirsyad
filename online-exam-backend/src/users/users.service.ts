@@ -13,6 +13,35 @@ export class UsersService {
 
   constructor(private readonly supabase: SupabaseClient) {}
 
+  private normalizeClassIdentifier(value: unknown): string {
+    return String(value ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[\s_-]+/g, '');
+  }
+
+  private sortUsers(rows: any[], sort: string, order: 'asc' | 'desc') {
+    const direction = order === 'asc' ? 1 : -1;
+
+    return [...rows].sort((left, right) => {
+      const leftValue = left?.[sort];
+      const rightValue = right?.[sort];
+
+      if (leftValue == null && rightValue == null) return 0;
+      if (leftValue == null) return -1 * direction;
+      if (rightValue == null) return 1 * direction;
+
+      if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+        return (leftValue - rightValue) * direction;
+      }
+
+      return String(leftValue).localeCompare(String(rightValue), 'id', {
+        numeric: true,
+        sensitivity: 'base',
+      }) * direction;
+    });
+  }
+
   // BULK UPLOAD USERS
   async bulkUploadUsers(fileBuffer: Buffer, createdBy: string) {
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
@@ -364,7 +393,7 @@ export class UsersService {
   ) {
     const offset = (page - 1) * limit;
 
-    let classId: string | null = null;
+    const classIdentifiers = new Set<string>();
 
     const currentRole = String(user?.role || '').toUpperCase();
 
@@ -379,7 +408,7 @@ export class UsersService {
     }
 
     if (examId) {
-      const { data: exam } = await this.supabase
+      const { data: exam, error: examError } = await this.supabase
         .from('exams')
         .select(
           `
@@ -394,12 +423,41 @@ export class UsersService {
         .eq('id', examId)
         .single();
 
+      if (examError || !exam) {
+        throw new NotFoundException('Ujian tidak ditemukan');
+      }
+
       const subject = Array.isArray(exam?.subjects) ? exam.subjects[0] : exam?.subjects;
-      classId = subject?.class_id ?? null;
 
       if (currentRole === 'GURU' && subject?.teacher_id !== user?.sub) {
         throw new ForbiddenException('Anda tidak memiliki akses ke ujian ini.');
       }
+
+      if (subject?.class_id) {
+        classIdentifiers.add(this.normalizeClassIdentifier(subject.class_id));
+
+        const { data: classRow, error: classError } = await this.supabase
+          .from('classes')
+          .select('id, name')
+          .eq('id', subject.class_id)
+          .is('deleted_at', null)
+          .maybeSingle();
+
+        if (classError) throw new InternalServerErrorException(classError.message);
+
+        if (classRow?.id) classIdentifiers.add(this.normalizeClassIdentifier(classRow.id));
+        if (classRow?.name) classIdentifiers.add(this.normalizeClassIdentifier(classRow.name));
+      }
+    }
+
+    if (examId && classIdentifiers.size === 0) {
+      return {
+        data: [],
+        total: 0,
+        page,
+        limit,
+        meta: { total: 0, page, limit, totalPages: 0 },
+      };
     }
 
     let query = this.supabase
@@ -412,8 +470,34 @@ export class UsersService {
       query = query.or(`name.ilike.%${search}%,userid.ilike.%${search}%,role.ilike.%${search}%,class_name.ilike.%${search}%`);
     }
 
-    if (classId) {
-      query = query.eq('class_id', classId);
+    if (examId && classIdentifiers.size > 0) {
+      const { data, error } = await query.order(sort, { ascending: order === 'asc' });
+
+      if (error) throw new InternalServerErrorException(error.message);
+
+      const filtered = (data || []).filter((student) => {
+        const studentClassIdentifiers = [student.class_id, student.class_name]
+          .map((value) => this.normalizeClassIdentifier(value))
+          .filter(Boolean);
+
+        return studentClassIdentifiers.some((identifier) => classIdentifiers.has(identifier));
+      });
+
+      const sorted = this.sortUsers(filtered, sort, order);
+      const paged = sorted.slice(offset, offset + limit);
+
+      return {
+        data: paged,
+        total: sorted.length,
+        page,
+        limit,
+        meta: {
+          total: sorted.length,
+          page,
+          limit,
+          totalPages: Math.ceil(sorted.length / limit),
+        },
+      };
     }
 
     const { data, error, count } = await query
