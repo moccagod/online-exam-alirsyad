@@ -1,3 +1,4 @@
+import {getUserFromToken} from "../utils/jwtHelper";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, MenuButton, MenuItems, MenuItem, Transition } from "@headlessui/react";
@@ -106,7 +107,7 @@ export default function ActionMenu({
           >
             <div className="py-1">
               {/* 🔧 Menu umum untuk Edit */}
-              {(menu == "exam" ||
+              {((menu == "exam" && getUserFromToken()?.role==="ADMIN") ||
                  menu == "user" ||
                  menu == "subjects" ||
                  menu == "questionnaire") &&
@@ -120,8 +121,8 @@ export default function ActionMenu({
               )}
 
               {/* 🔧 Untuk remedial: daftar siswa */}
-              {type === "REMEDIAL" && (
-                <ActionItem onClick={() => onShowStudents(itemId)} icon={UserGroupIcon} label="Students" />
+              {menu === "exam" && getUserFromToken()?.role==="ADMIN" && (
+                <ActionItem onClick={() => onShowStudents(itemId)} icon={UserGroupIcon} label="Peserta" />
               )}
 
               {/* 🔧 Untuk ujian → buka questionnaire */}
@@ -164,7 +165,7 @@ export default function ActionMenu({
               )}
 
               {/* 🗑️ Hapus (untuk menu yang mendukung) */}
-              {onDelete && (
+              {onDelete && (menu!=="exam" || getUserFromToken()?.role==="ADMIN") && (
                 <div className="border-t border-slate-100 my-1">
                   <ActionItem 
                     onClick={() => onDelete(itemId)} 

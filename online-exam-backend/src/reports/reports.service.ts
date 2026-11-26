@@ -1,3 +1,4 @@
+import {assignedExams} from '../exams/teacher-assignments';
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 
@@ -100,7 +101,7 @@ export class ReportsService {
     if (examIds.length === 0) return rows;
 
     const { data: questions, error } = await this.supabase
-      .from('questionnaires')
+      .from('exam_version_questions')
       .select('id,exam_id,type,answer')
       .in('exam_id', examIds)
       .is('deleted_at', null);
@@ -153,14 +154,7 @@ export class ReportsService {
   private async getAllowedSubjectIds(user?: any) {
     if (String(user?.role || '').toUpperCase() !== 'GURU') return null;
 
-    const { data, error } = await this.supabase
-      .from('subjects')
-      .select('id')
-      .eq('teacher_id', user.sub)
-      .is('deleted_at', null);
-
-    if (error) throw new InternalServerErrorException(error.message);
-    return (data || []).map((row: any) => row.id);
+    return (await assignedExams(this.supabase,user.sub)).map(e=>e.subject_id);
   }
 
   private async getReportSubjects(filter: ReportFilter, user?: any) {
@@ -234,7 +228,7 @@ export class ReportsService {
     if (filter.from) query = query.gte('date', filter.from);
     if (filter.to) query = query.lte('date', filter.to);
     if (filter.subjectId) query = query.eq('subject_id', filter.subjectId);
-    if (allowedSubjectIds) query = query.in('subject_id', allowedSubjectIds);
+    if (allowedSubjectIds) query = query.in('id', (await assignedExams(this.supabase,user.sub)).map(e=>e.id));
     if (filter.examType) query = query.eq('type', filter.examType.toUpperCase());
 
     const { data, error } = await query.order('date', { ascending: false });
@@ -355,7 +349,8 @@ export class ReportsService {
         rows = rows.filter((row: any) => row?.exam?.subject_id === filter.subjectId);
       }
       if (allowedSubjectIds) {
-        rows = rows.filter((row: any) => allowedSubjectIds.includes(row?.exam?.subject_id));
+        const allowed = new Set((await assignedExams(this.supabase,user.sub)).map(e=>e.id));
+        rows = rows.filter((row: any) => allowed.has(row.exam_id));
       }
       if (filter.examType) {
         rows = rows.filter(
@@ -612,7 +607,7 @@ export class ReportsService {
           roleSummary: { siswa: 0, guru: 0, admin: 0 },
         };
       }
-      submissionsQuery = submissionsQuery.in('exams.subject_id', allowedSubjectIds);
+      submissionsQuery = submissionsQuery.in('exam_id', (await assignedExams(this.supabase,user.sub)).map(e=>e.id));
     }
 
     const [submissionsRes, usersRes] = await Promise.all([

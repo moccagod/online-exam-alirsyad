@@ -24,7 +24,8 @@
     "migration:revert": "npm run typeorm -- migration:revert -d data-source.ts",
     "schema:sync": "npm run typeorm -- schema:sync -d data-source.ts",
     "db:migrate": "ts-node run-migrations.ts",
-    "seed:load-test": "ts-node scripts/seed-load-test.ts"
+    "seed:load-test": "ts-node scripts/seed-load-test.ts",
+    "test:exam-delivery": "npm run build && node test/exam-delivery.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -54,6 +55,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.6.0",
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
     "@nestjs/cli": "^11.0.0",

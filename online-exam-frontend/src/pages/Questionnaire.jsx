@@ -1,3 +1,4 @@
+import PackageTools from "../components/Questionnaire/PackageTools";
 import { useState, useEffect, Fragment } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
@@ -120,8 +121,9 @@ const Questionnaire = () => {
 
   const updateOption = (i, value) => {
     const opts = [...formData.options];
-    opts[i].value = value;
-    setFormData((prev) => ({ ...prev, options: opts }));
+    const previous = opts[i].value;
+    opts[i] = {...opts[i], value};
+    setFormData((prev) => ({ ...prev, options: opts, answer:previous && previous===prev.answer ? value : prev.answer }));
   };
 
   const fetchQuestionnaires = async () => {
@@ -163,7 +165,7 @@ const Questionnaire = () => {
         MySwal.fire("Gagal!", "Soal pilihan ganda harus memiliki minimal 2 opsi jawaban!", "error");
         return;
       }
-      if (formData.options.some(opt => !stripHtml(opt.value))) {
+      if (formData.options.some(opt => !stripHtml(opt.value) && !/<img\b/i.test(opt.value))) {
         MySwal.fire("Gagal!", "Semua opsi jawaban harus diisi!", "error");
         return;
       }
@@ -237,7 +239,7 @@ const Questionnaire = () => {
         MySwal.fire("Gagal!", "Soal pilihan ganda harus memiliki minimal 2 opsi jawaban!", "error");
         return;
       }
-      if (formData.options.some(opt => !stripHtml(opt.value))) {
+      if (formData.options.some(opt => !stripHtml(opt.value) && !/<img\b/i.test(opt.value))) {
         MySwal.fire("Gagal!", "Semua opsi jawaban harus diisi!", "error");
         return;
       }
@@ -323,6 +325,7 @@ const Questionnaire = () => {
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+          <PackageTools examId={examId} onChange={fetchQuestionnaires} />
           <SearchBar value={search} />
 
           {loading ? (

@@ -53,7 +53,7 @@ export class ExamSubmissionController {
   @Post(':examId')
   async submitExam(
     @Param('examId') examId: string,
-    @Body() body: { answers: any[]; sessionId: string },
+    @Body() body: { answers: any[]; sessionId: string; revision: number },
     @Req() req: any,
   ) {
     const studentId = req.user?.sub;
@@ -71,7 +71,7 @@ export class ExamSubmissionController {
       session_id: body.sessionId,
       answers: body.answers,
       created_by: studentId,
-    });
+    }, body.revision);
   }
 
   @Get(':examId/me')

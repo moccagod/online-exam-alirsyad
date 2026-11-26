@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException, Logger, InternalServerErrorException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import * as bcrypt from 'bcrypt';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { User } from './entities/user.entity';
 import * as XLSX from 'xlsx';
+
+const publicFields = 'id,name,userid,role,is_active,class_id,class_name,nisn,gender,description,created_at,created_by,updated_at,updated_by,deleted_at,deleted_by';
 
 @Injectable()
 export class UsersService {
@@ -147,7 +149,7 @@ export class UsersService {
   }
 
   // CREATE USER
-  async createUser(user: Partial<User>): Promise<User> {
+  async createUser(user: Partial<User>): Promise<Omit<User, "password">> {
     Object.keys(user).forEach((key) => {
       if (user[key] === '') user[key] = null;
     });
@@ -175,7 +177,7 @@ export class UsersService {
     const { data, error } = await this.supabase
       .from('users')
       .insert(user)
-      .select('*')
+      .select(publicFields)
       .single();
 
     if (error) throw new InternalServerErrorException(error.message);
@@ -194,7 +196,7 @@ export class UsersService {
 
     let query = this.supabase
       .from('users')
-      .select('*', { count: 'exact' })
+      .select(publicFields, { count: 'exact' })
       .is('deleted_at', null);
 
     if (search.trim()) {
@@ -222,7 +224,7 @@ export class UsersService {
   async getAllUsers() {
     const { data, error } = await this.supabase
       .from('users')
-      .select('*')
+      .select(publicFields)
       .is('deleted_at', null)
       .order('is_active', { ascending: false })
       .order('name', { ascending: true });
@@ -252,7 +254,7 @@ export class UsersService {
   async getUserById(id: string | number) {
     const { data } = await this.supabase
       .from('users')
-      .select('*')
+      .select(publicFields)
       .eq('id', String(id))
       .is('deleted_at', null)
       .single();
@@ -275,7 +277,7 @@ export class UsersService {
         updated_by: updatedBy,
       })
       .eq('id', id)
-      .select('*')
+      .select(publicFields)
       .single();
 
     if (error) throw new InternalServerErrorException(error.message);
@@ -288,7 +290,7 @@ export class UsersService {
       .from('users')
       .update(update)
       .eq('id', id)
-      .select('*')
+      .select(publicFields)
       .single();
 
     if (error) throw new InternalServerErrorException(error.message);
@@ -305,7 +307,7 @@ export class UsersService {
         is_active: false,
       })
       .eq('id', id)
-      .select('*')
+      .select(publicFields)
       .single();
 
     if (error) throw new InternalServerErrorException(error.message);
@@ -339,45 +341,23 @@ export class UsersService {
     };
   }
 
-  // RANDOM STRING
-  private generateRandomString(length = 8): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  async issueInitialPassword(id: string) {
+    const password = randomBytes(15).toString('base64url');
+    const { data, error } = await this.supabase.from('users')
+      .update({ password: await bcrypt.hash(password, 10), must_change_password: true })
+      .eq('id', id).eq('role', 'SISWA').is('deleted_at', null).select('id').maybeSingle();
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!data) throw new NotFoundException('Siswa tidak ditemukan');
+    return { password };
   }
 
-  // RESET ALL SISWA PASSWORD (SAME FOR ALL)
-  async generateSamePasswordForAllSiswa() {
-    // FETCH ALL ACTIVE SISWA
-    const { data: siswaList, error: fetchError } = await this.supabase
-      .from('users')
-      .select('id')
-      .eq('role', 'SISWA')
-      .is('deleted_at', null);
-
-    if (fetchError) throw new InternalServerErrorException(fetchError.message);
-    if (!siswaList || siswaList.length === 0) {
-      throw new NotFoundException('No SISWA users found to update');
-    }
-
-    const rawPassword = `TOKEN-${this.generateRandomString(6).toUpperCase()}`;
-    const hashed = bcrypt.hashSync(rawPassword, 10);
-
-    // UPDATE ALL SISWA WITH THE SAME PASSWORD
-    const { error: updateError } = await this.supabase
-      .from('users')
-      .update({ password: hashed })
-      .eq('role', 'SISWA')
-      .is('deleted_at', null);
-
-    if (updateError) throw new InternalServerErrorException(updateError.message);
-
-    this.logger.log(`Updated ${siswaList.length} SISWA with same password: ${rawPassword}`);
-
-    return {
-      updated: siswaList.length,
-      password: rawPassword,
-      message: 'Password seluruh siswa berhasil diperbarui dengan token baru.',
-    };
+  async replaceInitialPassword(id: string, previous: string, password: string) {
+    const { data, error } = await this.supabase.from('users')
+      .update({ password: await bcrypt.hash(password, 10), must_change_password: false })
+      .eq('id', id).eq('password', previous).eq('must_change_password', true)
+      .select('id').maybeSingle();
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!data) throw new BadRequestException('Silakan login kembali.');
   }
 
   // USERS BY ROLE
@@ -413,7 +393,7 @@ export class UsersService {
         .select(
           `
           id,
-          subject_id,
+          subject_id, assigned_teacher_id,
           subjects (
             class_id,
             teacher_id
@@ -429,7 +409,7 @@ export class UsersService {
 
       const subject = Array.isArray(exam?.subjects) ? exam.subjects[0] : exam?.subjects;
 
-      if (currentRole === 'GURU' && subject?.teacher_id !== user?.sub) {
+      if (currentRole === 'GURU' && (exam.assigned_teacher_id ?? subject?.teacher_id) !== user?.sub) {
         throw new ForbiddenException('Anda tidak memiliki akses ke ujian ini.');
       }
 
@@ -462,7 +442,7 @@ export class UsersService {
 
     let query = this.supabase
       .from('users')
-      .select('*', { count: 'exact' })
+      .select(publicFields, { count: 'exact' })
       .eq('role', role)
       .is('deleted_at', null);
 

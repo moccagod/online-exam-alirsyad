@@ -1,3 +1,4 @@
+import { grade, gradingWeights } from "./grade";
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 
@@ -39,6 +40,8 @@ export class ExamSubmissionJobWorker implements OnModuleInit, OnModuleDestroy {
     this.processing = true;
 
     try {
+      const { error: closeError } = await this.supabase.rpc('exam_close_due');
+      if (closeError) console.error('Penutupan sesi gagal', closeError.code);
       await this.releaseStaleJobs();
 
       const { data: jobs, error } = await this.supabase
@@ -127,14 +130,14 @@ export class ExamSubmissionJobWorker implements OnModuleInit, OnModuleDestroy {
 
   private async scoreSubmission(job: ExamSubmissionJob) {
     const { data: questions, error: qError } = await this.supabase
-      .from('questionnaires')
+      .from('exam_version_questions')
       .select('id, type, answer')
       .eq('exam_id', job.exam_id)
       .is('deleted_at', null);
 
     if (qError) throw new Error(`Failed to fetch questions for submission scoring: ${qError.message}`);
 
-    const { scoredAnswers, totalScore } = this.scoreAnswers(job.answers || [], questions || []);
+    const { scoredAnswers, totalScore } = grade(questions || [], job.answers || [], await gradingWeights(this.supabase,job.exam_id));
     const { error } = await this.supabase
       .from('exam_submissions')
       .update({
@@ -143,47 +146,9 @@ export class ExamSubmissionJobWorker implements OnModuleInit, OnModuleDestroy {
         updated_at: new Date(),
         updated_by: job.updated_by,
       })
-      .eq('id', job.submission_id);
+      .eq('id', job.submission_id).is('score',null);
 
     if (error) throw new Error(`Failed to score exam submission: ${error.message}`);
-  }
-
-  private scoreAnswers(answers: any[], questions: any[]) {
-    const mcQuestions = (questions || []).filter((question) => question.type === 'multiple_choice');
-    const essayQuestions = (questions || []).filter((question) => question.type === 'essay');
-    const multipleChoiceIds = new Set(mcQuestions.map((question) => String(question.id)));
-    const answerByQuestionId = new Map(
-      (answers || []).map((answer) => [String(answer.question_id), answer]),
-    );
-
-    const scoredAnswers = (questions || []).map((question) => {
-      const submittedAnswer = answerByQuestionId.get(String(question.id));
-      const answerValue = submittedAnswer?.answer ?? '';
-      const isCorrect =
-        question.type === 'multiple_choice'
-          ? String(answerValue).trim().toLowerCase() === String(question.answer).trim().toLowerCase()
-          : null;
-
-      return {
-        ...(submittedAnswer || {}),
-        question_id: question.id,
-        answer: answerValue,
-        is_correct: isCorrect,
-      };
-    });
-
-    const totalScore =
-      mcQuestions.length > 0 && essayQuestions.length === 0
-        ? Math.round(
-            (scoredAnswers.filter(
-              (answer) => multipleChoiceIds.has(String(answer.question_id)) && answer.is_correct === true,
-            ).length /
-              mcQuestions.length) *
-              100,
-          )
-        : null;
-
-    return { scoredAnswers, totalScore };
   }
 
   private async markCompleted(jobId: string) {

@@ -32,7 +32,6 @@ export class AuthService {
 
   blacklistToken(token: string) {
     this.blacklistedTokens.add(token);
-    console.log('Token blacklisted:', token);
   }
 
   isTokenBlacklisted(token: string): boolean {
@@ -63,7 +62,7 @@ export class AuthService {
       password: hashed,
       name: dto.name,
       role: dto.role,
-      is_active: dto.is_active ?? false,
+      is_active: false,
       created_at: new Date(),
       created_by: createdBy,
     });
@@ -89,7 +88,7 @@ export class AuthService {
    * VALIDASI USER
    * ===========================
    */
-  async validateUser(id: string, password: string) {
+  async validateUser(id: string, password: string, replacement?: string) {
     const userid = String(id ?? '').trim();
     const inputPassword = String(password ?? '').trim();
     const user = await this.usersService.getUserByNisNik(userid);
@@ -111,6 +110,14 @@ export class AuthService {
       throw new UnauthorizedException('Password salah');
     }
 
+    if (user.must_change_password && replacement) {
+      const next = replacement.trim();
+      if (next.length < 8 || Buffer.byteLength(next) > 72 || next === inputPassword) {
+        throw new BadRequestException('Gunakan kata sandi baru minimal 8 karakter dan maksimal 72 byte.');
+      }
+      await this.usersService.replaceInitialPassword(user.id, user.password, next);
+      user.must_change_password = false;
+    }
     const { password: _, ...safeUser } = user;
     return safeUser;
   }
@@ -120,7 +127,8 @@ export class AuthService {
    * ===========================
    */
   async login(dto: LoginDto) {
-    const user = await this.validateUser(dto.userid, dto.password);
+    const user = await this.validateUser(dto.userid, dto.password, dto.new_password);
+    if (user.must_change_password) return { must_change_password: true };
 
     const payload = {
       sub: user.id,

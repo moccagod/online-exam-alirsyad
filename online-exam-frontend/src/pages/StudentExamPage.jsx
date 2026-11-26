@@ -1,3 +1,5 @@
+import { getUserFromToken } from "../utils/jwtHelper";
+import { incident } from "../components/Recovery";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../api/axiosConfig";
@@ -49,6 +51,39 @@ const StudentExamPage = () => {
   const [questions, setQuestions] = useState([]);
   const [studentAnswers, setStudentAnswers] = useState({});
 
+  const [receiptId,setReceiptId] = useState("");
+  const [loadFailed,setLoadFailed] = useState(false);
+  const clockOffset = useRef(0);
+  const [clock,setClock] = useState(Date.now);
+  useEffect(()=>{
+    const tick = setInterval(()=>setClock(Date.now()+clockOffset.current),1000);
+    return ()=>clearInterval(tick);
+  },[]);
+  const [entryToken, setEntryToken] = useState("");
+  const [prepared, setPrepared] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+  const stateRef = useRef({revision: 0, draft: {}});
+  const deadline = useRef(0);
+  const owner = useRef(getUserFromToken()?.sub);
+  const storageKey = "exam-draft:" + owner.current + ":" + examId;
+  const restore = (data) => {
+    const questions = data.questions.map(q => ({...q, options: normalizeOptions(q.options)}));
+    setQuestions(questions);
+    deadline.current = Date.now() + Date.parse(data.ends_at) - Date.parse(data.server_time);
+    setTimeLeft(Math.max(0, Math.ceil((deadline.current - Date.now()) / 1000)));
+    setPrepared(true);
+    if (data.id) {
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch { /* storage unavailable */ }
+      stateRef.current = saved?.session === data.id && saved.revision > data.revision
+        ? saved : {session: data.id, revision: data.revision || 0, draft: data.draft || {}};
+      setStudentAnswers(stateRef.current.draft);
+      setSessionId(data.id);
+      setStarted(true);
+    }
+  };
+
   // Session & status
   const [started, setStarted] = useState(false);
   const [sessionId, setSessionId] = useState(null);
@@ -57,7 +92,7 @@ const StudentExamPage = () => {
   const [starting, setStarting] = useState(false);
   const [startMessage, setStartMessage] = useState("Memulai ujian...");
   const [submitting, setSubmitting] = useState(false);
-  const [violationCount, setViolationCount] = useState(0);
+  const flushWarnings = useRef(async () => true);
 
   // Refs
   const submittingRef = useRef(false);
@@ -89,24 +124,27 @@ const StudentExamPage = () => {
       try {
         const { data: examData } = await api.get(`/exams/${examId}`);
 
+        clockOffset.current = (Date.parse(examData.server_time) || Date.now()) - Date.now();
+        setClock(Date.now()+clockOffset.current);
         setExam(examData);
-        setTimeLeft(Number(examData.duration) * 60);
-
-        const { data: qRes } = await api.get(`/exams/${examId}/questions`);
-
-        console.log(qRes.questions);
-        
-
-        const normalizedQuestions = (qRes.questions || []).map((question) => ({
-          ...question,
-          options: normalizeOptions(question.options),
-        }));
-
-        setQuestions(normalizedQuestions);
-      } catch (err) {
-        console.error("Gagal ambil exam:", err);
-        Swal.fire("Error", "Gagal memuat ujian", "error");
-        navigate("/student/exam");
+        const result = await api.get("/exam-submissions/" + examId + "/me");
+        if (result.data.submitted && result.data.receipt) {
+          setReceiptId(result.data.receipt);
+          const local = JSON.parse(localStorage.getItem(storageKey) || "null");
+          if (local?.session===result.data.session) {
+            await api.post("/exam-sessions/"+local.session+"/review",{revision:local.revision});
+          }
+          return;
+        }
+        try {
+          const {data} = await api.post("/exam-sessions/" + examId + "/prepare", {});
+          restore(data);
+        } catch (err) {
+          setNotice(err.response?.data?.message || "Periksa koneksi dan coba lagi.");
+        }
+      } catch {
+        setLoadFailed(true);
+        setNotice("Gagal memuat ujian. Kode kejadian " + incident("jadwal"));
       } finally {
         setLoading(false);
       }
@@ -116,68 +154,64 @@ const StudentExamPage = () => {
   }, [examId, navigate]);
 
   /* ---------------- Proctoring ---------------- */
-  const violationRef = useRef(0);
-  const alarm = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3"));
-
   useEffect(() => {
     if (!started) return;
-
-    const currentAlarm = alarm.current;
-    currentAlarm.loop = true;
-
-    const showWarning = async (msg) => {
-      // Play alarm
-      currentAlarm.play().catch(e => console.log("Autoplay blocked or audio error", e));
-      
-      violationRef.current += 1;
-
-      if (violationRef.current >= 3) {
-        if (sessionId) {
-          await api
-            .post(`/exam-sessions/${sessionId}/disqualify`, {
-              reason: "proctoring_violation",
-            })
-            .catch((err) => console.error("Gagal menandai sesi diskualifikasi:", err));
+    let away = false;
+    const key = storageKey + ":events:" + sessionId;
+    let queue = [];
+    try { queue = JSON.parse(localStorage.getItem(key) || "[]"); } catch { /* storage unavailable */ }
+    const persist = () => { try { localStorage.setItem(key,JSON.stringify(queue)); } catch { /* keep in memory */ } };
+    let pending;
+    const drain = async () => {
+      while (queue.length) {
+        const event = queue[0];
+        try {
+          const {data} = await api.post("/exam-sessions/" + sessionId + "/violation", {event});
+          queue.shift(); persist();
+          if (data.status === "locked") {
+            queue.length=0; persist();
+            if(mediaRecorderRef.current?.state==="recording") mediaRecorderRef.current.stop();
+            setStarted(false); setPrepared(false); setNotice("Sesi terkunci. Hubungi operator.");
+            return false;
+          }
+          void Swal.fire("Peringatan " + data.count + "/3", "Halaman ujian ditinggalkan.", "warning");
+        } catch {
+          setNotice("Peringatan tersimpan di perangkat. Perlu koneksi.");
+          return false;
         }
-
-        await Swal.fire({
-          title: "DISKUALIFIKASI!",
-          text: "Anda telah melakukan pelanggaran lebih dari 2 kali. Sesi ujian Anda dihentikan.",
-          icon: "error",
-          confirmButtonText: "OK",
-        });
-        currentAlarm.pause();
-        localStorage.removeItem("token");
-        allowInternalNavigation();
-        window.location.href = "/"; // Force hard redirect
-        return;
       }
-
-      await Swal.fire({
-        title: "Peringatan!",
-        text: `${msg} (Pelanggaran ke-${violationRef.current}/2)`,
-        icon: "warning",
-        confirmButtonText: "Saya Mengerti",
-      });
-
-      currentAlarm.pause();
-      currentAlarm.currentTime = 0;
-
-      if (sessionId && !submittingRef.current) {
-        await api.post(`/exam-sessions/${sessionId}/tab-switch`, {});
-      }
+      return true;
     };
-
+    const flush = () => {
+      if (!pending) pending = drain().finally(()=>{pending=null;});
+      return pending;
+    };
+    flushWarnings.current = flush;
+    const leave = () => {
+      if (away || submittingRef.current || internalNavigationRef.current) return;
+      away = true;
+      queue.push(String(Date.now()) + "-" + Math.random().toString(36).slice(2));
+      persist();
+      try {
+        const audio = new AudioContext();
+        const tone = audio.createOscillator();
+        tone.connect(audio.destination); tone.start(); tone.stop(audio.currentTime + 0.25);
+        tone.onended = () => audio.close();
+      } catch { /* audio optional */ }
+      void flush();
+    };
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement && !submittingRef.current) {
-        showWarning("Anda keluar dari fullscreen!");
-      }
+      if (document.fullscreenElement) away=false;
+      else leave();
     };
+    const onInteraction = () => { if (!document.hidden) away=false; };
+    document.addEventListener("pointerdown",onInteraction);
     const handleVisibilityChange = () => {
-      if (document.hidden && !submittingRef.current) {
-        showWarning("Anda tidak boleh berpindah tab!");
-      }
+      if (document.hidden) leave();
+      else away=false;
     };
+    void flush();
+    window.addEventListener("online",flush);
     const handleBeforeUnload = (e) => {
       if (internalNavigationRef.current || window.__ALLOW_INTERNAL_NAVIGATION__) return;
       e.preventDefault();
@@ -192,7 +226,10 @@ const StudentExamPage = () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      currentAlarm.pause();
+      document.removeEventListener("pointerdown",onInteraction);
+      window.removeEventListener("online",flush);
+      flushWarnings.current = async()=>true;
+
     };
   }, [started, sessionId]);
 
@@ -304,8 +341,33 @@ const StudentExamPage = () => {
 
   /* ---------------- Handlers ---------------- */
   const handleAnswerChange = (questionId, answer) => {
-    setStudentAnswers((prev) => ({ ...prev, [questionId]: answer }));
+    const draft = {...stateRef.current.draft, [questionId]: answer};
+    const next = {session:sessionId, revision:stateRef.current.revision + 1, draft};
+    stateRef.current = next;
+    setStudentAnswers(draft);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      setSaveStatus("Tersimpan di perangkat");
+    } catch { setSaveStatus("Penyimpanan perangkat penuh"); }
   };
+
+  useEffect(() => {
+    if (!sessionId || !started) return;
+    let active = true;
+    const sync = async () => {
+      const next = stateRef.current;
+      try {
+        const {data} = await api.post("/exam-sessions/" + sessionId + "/draft", next);
+        if (active && next === stateRef.current && data.revision === next.revision) setSaveStatus("Tersimpan di server");
+      } catch {
+        if (active) setSaveStatus("Perlu koneksi");
+      }
+    };
+    const timer = setTimeout(sync, 300);
+    const retry = setInterval(sync, 15000);
+    window.addEventListener("online", sync);
+    return () => { active = false; clearTimeout(timer); clearInterval(retry); window.removeEventListener("online", sync); };
+  }, [studentAnswers, started, sessionId]);
 
   const requestFullscreenIfAvailable = async () => {
     const elem = document.documentElement;
@@ -327,13 +389,16 @@ const StudentExamPage = () => {
     try {
       setStarting(true);
       setStartMessage("Menyiapkan sesi ujian...");
-      const { data } = await api.post(`/exam-sessions/${examId}/start`, {}, {
+      const route = prepared ? "start" : "prepare";
+      if (prepared) void requestFullscreenIfAvailable();
+      const { data } = await api.post("/exam-sessions/" + examId + "/" + route, {token:entryToken}, {
         timeout: START_TIMEOUT_MS,
         skipAuthRedirect: true,
       });
 
-      setSessionId(data.id);
-      setStarted(true);
+      restore(data);
+      setNotice("");
+      if (!data.id) return;
 
       // 🔹 Robust Fullscreen Request
       setStartMessage("Mengaktifkan mode fullscreen...");
@@ -359,11 +424,11 @@ const StudentExamPage = () => {
         });
       }
     } catch (err) {
-      console.error("Gagal mulai ujian:", err);
+      const code = incident("mulai");
       const message =
         err.response?.status === 401
           ? "Sesi login Anda sudah berakhir. Silakan login kembali sebelum memulai ujian."
-          : err.userMessage || "Tidak bisa memulai sesi ujian. Periksa koneksi lalu coba lagi.";
+          : (err.response?.data?.message || "Tidak bisa memulai sesi ujian.") + " - " + code;
 
       await Swal.fire("Error", message, "error");
       if (err.response?.status === 401) {
@@ -451,45 +516,47 @@ const StudentExamPage = () => {
         didOpen: () => Swal.showLoading(),
       });
 
+      if (!auto && !(await flushWarnings.current())) {
+        throw new Error("Pengawasan belum tersinkron. Periksa koneksi atau hubungi operator.");
+      }
       const payload = {
-        answers: questions.map((question) => ({
-          question_id: question.id,
-          answer: studentAnswers[question.id] ?? "",
-        })),
+        answers: Object.entries(stateRef.current.draft).map(([question_id, answer]) => ({question_id, answer})),
+        revision: stateRef.current.revision,
         sessionId: sessionId,
       };
 
-      await submitExamWithRetry(payload);
+      const {data: receipt} = await submitExamWithRetry(payload);
+      if (!receipt?.id) throw new Error("Bukti penerimaan belum tersedia");
+      if (receipt.revision >= stateRef.current.revision) { try { localStorage.removeItem(storageKey); } catch { /* receipt is authoritative */ } }
+      else await api.post("/exam-sessions/" + sessionId + "/review", {}).catch(() => {});
 
       allowInternalNavigation();
 
       // Stop recording + exit fullscreen
-      if (document.fullscreenElement) await document.exitFullscreen();
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
       if (
         mediaRecorderRef.current &&
         mediaRecorderRef.current.state !== "inactive"
       ) {
-        mediaRecorderRef.current.stop();
+        try { mediaRecorderRef.current.stop(); } catch { /* upload independent of receipt */ }
       }
 
       await Swal.fire({
         icon: "success",
-        title: auto ? "Waktu Habis!" : "Ujian Terkirim!",
-        text: auto
-          ? "Waktu ujian selesai. Jawaban yang sudah kamu isi berhasil dikirim."
-          : "Jawaban kamu berhasil dikirim. Terima kasih sudah mengikuti ujian.",
+        title: "Ujian terkirim",
+        text: "Bukti penerimaan " + receipt.id,
         confirmButtonText: "OK",
       });
 
       navigate("/student/exam");
     } catch (err) {
-      console.error("Submit error:", err);
+      const code = incident("kirim");
       if (err.response?.status === 401) {
         allowInternalNavigation();
       } else {
         blockInternalNavigation();
       }
-      Swal.fire("Error", err.userMessage || "Gagal menyimpan jawaban", "error");
+      Swal.fire("Error", (err.response?.data?.message || err.message || "Gagal menyimpan jawaban") + " - " + code, "error");
     } finally {
       if (!internalNavigationRef.current) submittingRef.current = false;
       setSubmitting(false);
@@ -510,7 +577,7 @@ const StudentExamPage = () => {
           }
           return 0;
         }
-        return prev - 1;
+        return Math.max(0, Math.ceil((deadline.current - Date.now()) / 1000));
       });
     }, 1000);
 
@@ -539,6 +606,8 @@ const StudentExamPage = () => {
   /* ---------------- Render ---------------- */
   if (loading) return <p className="p-6">Loading...</p>;
 
+  if (receiptId) return <main className="p-6"><h1>Ujian terkirim</h1><p>Bukti penerimaan {receiptId}</p></main>;
+  const isOpen = exam?.starts_at && clock >= Date.parse(exam.starts_at) && clock < Date.parse(exam.ends_at);
   if (!started) {
     return (
       <div className="w-screen h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-100 to-white text-center px-6">
@@ -560,14 +629,19 @@ const StudentExamPage = () => {
             </p>
           </div>
 
+          <p>{notice}</p>
+          {exam?.starts_at ? <p>{new Date(exam.starts_at).toLocaleString("id-ID",{timeZone:"Asia/Jakarta"})} sampai {new Date(exam.ends_at).toLocaleTimeString("id-ID",{timeZone:"Asia/Jakarta"})} WIB</p> : <p>Perlu dilengkapi</p>}
+          {isOpen && <>{prepared ? <div className="p-4"><p>Pratinjau soal pertama</p><RichTextRenderer content={questions[0]?.question} /></div> :
+            <label className="block p-4">Token ujian <input value={entryToken} onChange={e=>setEntryToken(e.target.value)} className="border p-2" /></label>}
           <LoadingButton
             onClick={handleStart}
             loading={starting}
             loadingText={startMessage}
             className="px-8 py-3 bg-blue-600 text-white text-lg font-semibold rounded-xl shadow-md hover:bg-blue-700 transition-all duration-200 transform hover:scale-105"
           >
-            Mulai Ujian Sekarang 🎯
-          </LoadingButton>
+            {prepared ? "Mulai ujian" : "Muat soal"}
+          </LoadingButton></>}
+          {(!isOpen || loadFailed) && <button onClick={()=>location.reload()}>Coba lagi</button>}
 
           <p className="mt-6 text-sm text-gray-500">
             Semoga sukses! Fokus, tenang, dan tunjukkan kemampuan terbaikmu 💪
@@ -583,7 +657,7 @@ const StudentExamPage = () => {
       {/* Header Ujian */}
       <header className="flex justify-between items-center px-6 py-4 bg-white shadow-md sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          {!isFullscreen && (
+          {!isFullscreen && (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) && (
             <button
               onClick={requestFullscreen}
               className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold animate-pulse hover:bg-red-700 transition-colors shadow-lg"
@@ -695,6 +769,7 @@ const StudentExamPage = () => {
 
       {/* Tombol Submit */}
       <footer className="p-4 bg-white shadow-inner flex justify-end items-center sticky bottom-0">
+        <span role="status" className="mr-4">{saveStatus}</span>
         <LoadingButton
           onClick={handleSubmit}
           loading={submitting}

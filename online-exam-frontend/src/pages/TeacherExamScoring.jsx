@@ -77,11 +77,12 @@ const TeacherExamScoring = () => {
     const questions = submission?.questions || [];
     const multipleChoiceQuestions = questions.filter((q) => q.type === "multiple_choice");
     const essayQuestions = questions.filter((q) => q.type !== "multiple_choice");
-    const multipleChoiceCorrect = multipleChoiceQuestions.filter((q) => scoring[q.id] === true).length;
+    const multipleChoiceCorrect = multipleChoiceQuestions.filter((q) => String(q.student_answer ?? "").trim() && scoring[q.id] === true).length;
     const multipleChoiceScore = multipleChoiceQuestions.length
-      ? Math.round((multipleChoiceCorrect / multipleChoiceQuestions.length) * 100)
+      ? (multipleChoiceCorrect / multipleChoiceQuestions.length) * 100
       : null;
     const essayQuestionScores = essayQuestions.map((q) => {
+      if (!String(q.student_answer ?? "").trim()) return 0;
       const rawScore = essayScores[q.id];
       const parsedScore = rawScore === "" || rawScore === undefined || rawScore === null ? null : Number(rawScore);
       return Number.isFinite(parsedScore)
@@ -92,7 +93,7 @@ const TeacherExamScoring = () => {
       ? essayQuestionScores.reduce((sum, score) => sum + Number(score), 0)
       : null;
     const safeEssayScore = totalEssayScore !== null
-      ? Math.round(totalEssayScore / essayQuestionScores.length)
+      ? totalEssayScore / essayQuestionScores.length
       : null;
     const multipleChoiceWeight = Math.max(0, Math.min(100, Number(submission?.exam?.multiple_choice_weight ?? 50)));
     const essayWeight = Math.max(0, Math.min(100, Number(submission?.exam?.essay_weight ?? 50)));
@@ -101,7 +102,7 @@ const TeacherExamScoring = () => {
       { score: essayQuestions.length > 0 ? safeEssayScore : null, weight: essayWeight },
     ].filter((component) => component.score !== null);
     const activeWeightTotal = components.reduce((sum, component) => sum + component.weight, 0);
-    const finalScore = components.length
+    const finalScore = components.length === 1 ? Math.round(components[0].score) : components.length
       ? Math.round(
           components.reduce((sum, component) => sum + component.score * component.weight, 0) /
             (activeWeightTotal || components.length),
@@ -112,10 +113,10 @@ const TeacherExamScoring = () => {
       multipleChoiceQuestions,
       essayQuestions,
       multipleChoiceCorrect,
-      multipleChoiceScore,
+      multipleChoiceScore: multipleChoiceScore == null ? null : Math.round(multipleChoiceScore),
       essayQuestionScores,
       totalEssayScore,
-      safeEssayScore,
+      safeEssayScore: safeEssayScore == null ? null : Math.round(safeEssayScore),
       multipleChoiceWeight,
       essayWeight,
       finalScore,

@@ -53,7 +53,6 @@ const Register = () => {
         navigate('/'); // Redirect ke halaman login
       });
     } catch (err) {
-      console.error('Registrasi gagal:', err);
       setError(err.response?.data?.message || 'Registrasi gagal, silakan coba lagi.');
       setLoading(false);
     }

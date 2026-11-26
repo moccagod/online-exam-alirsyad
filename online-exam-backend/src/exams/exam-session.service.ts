@@ -1,8 +1,7 @@
 import {
-  HttpException,
+  HttpException, BadRequestException,
   Injectable,
   InternalServerErrorException,
-  NotFoundException,
   PayloadTooLargeException,
 } from "@nestjs/common";
 import { SupabaseClient } from "@supabase/supabase-js";
@@ -21,102 +20,28 @@ const isPayloadTooLargeStorageError = (error: any) =>
 export class ExamSessionService {
   constructor(private readonly supabase: SupabaseClient) {}
 
-  /* -------------------------------------------------------
-   *  START EXAM SESSION
-   * -----------------------------------------------------*/
-  async startSession(examId: string, studentId: string) {
-    const { data: existing, error: existingError } = await this.supabase
-      .from("exam_sessions")
-      .select("*")
-      .eq("exam_id", examId)
-      .eq("student_id", studentId)
-      .eq("finished", false)
-      .limit(1)
-      .maybeSingle();
-
-    if (existingError) throw new InternalServerErrorException(existingError.message);
-    if (existing) return existing;
-
-    const { data, error } = await this.supabase
-      .from("exam_sessions")
-      .insert({
-        exam_id: examId,
-        student_id: studentId,
-      })
-      .select()
-      .single();
-
-    if (error) throw new InternalServerErrorException(error.message);
+  async prepare(exam: string, student: string, token: string, start: boolean) {
+    const {data, error} = await this.supabase.rpc('exam_prepare', {
+      p_exam: exam, p_student: student, p_token: token || '', p_start: start
+    });
+    if (error) throw new BadRequestException(error.message);
     return data;
   }
 
-  /* -------------------------------------------------------
-   *  INCREMENT TAB SWITCH
-   * -----------------------------------------------------*/
-  async incrementTabSwitch(sessionId: string) {
-    const { data: session, error: getErr } = await this.supabase
-      .from("exam_sessions")
-      .select("*")
-      .eq("id", sessionId)
-      .single();
-
-    if (getErr || !session) throw new NotFoundException("Session not found");
-
-    const newCount = (session.tab_switch_count || 0) + 1;
-
-    const { data, error } = await this.supabase
-      .from("exam_sessions")
-      .update({ tab_switch_count: newCount })
-      .eq("id", sessionId)
-      .select()
-      .single();
-
-    if (error) throw new InternalServerErrorException(error.message);
+  async attempt(id: string, student: string, action: string, body: any) {
+    if (action === 'draft' && (!Number.isSafeInteger(body?.revision) || body.revision < 0)) {
+      throw new BadRequestException('Revisi draf tidak valid');
+    }
+    if (action === 'violation' && (typeof body?.event !== 'string' || !/^[\w-]{1,80}$/.test(body.event))) {
+      throw new BadRequestException('Kode kejadian tidak valid');
+    }
+    const {data, error} = await this.supabase.rpc('exam_attempt', {
+      p_session: id, p_student: student, p_action: action, p_body: body
+    });
+    if (error) throw new BadRequestException(error.message);
     return data;
   }
 
-  /* -------------------------------------------------------
-   *  FINISH SESSION
-   * -----------------------------------------------------*/
-  async finishSession(sessionId: string) {
-    const { data, error } = await this.supabase
-      .from("exam_sessions")
-      .update({
-        finished: true,
-        status: "finished",
-        finished_reason: "submitted",
-        finished_at: new Date(),
-        updated_at: new Date(),
-      })
-      .eq("id", sessionId)
-      .select()
-      .single();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    return data;
-  }
-
-  async disqualifySession(sessionId: string, reason = "proctoring_violation") {
-    const { data, error } = await this.supabase
-      .from("exam_sessions")
-      .update({
-        finished: true,
-        status: "disqualified",
-        finished_reason: reason,
-        finished_at: new Date(),
-        updated_at: new Date(),
-      })
-      .eq("id", sessionId)
-      .select()
-      .single();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    return data;
-  }
-
-  /* -------------------------------------------------------
-   *  UPLOAD & COMPRESS VIDEO
-   * -----------------------------------------------------*/
   async uploadVideo(sessionId: string, file: Express.Multer.File, user: any) {
     try {
       if (!file)
@@ -134,6 +59,7 @@ export class ExamSessionService {
       const { data: session, error: sErr } = await this.supabase
         .from("exam_sessions")
         .select("exam_id")
+        .eq("student_id", user.sub)
         .eq("id", sessionId)
         .single();
 

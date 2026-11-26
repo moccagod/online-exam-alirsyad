@@ -33,7 +33,7 @@ export class ExamController {
   }
 
   @Post()
-  @Roles(Role.ADMIN, Role.GURU)
+  @Roles(Role.ADMIN)
   async create(@Body() body: any, @Req() req: any) {
     const createdBy = req.user?.sub;
 
@@ -87,6 +87,43 @@ export class ExamController {
     );
   }
 
+  @Get(':id/recalculate')
+  @Roles(Role.ADMIN)
+  preview(@Param('id') id: string,@Req() req:any) {
+    return this.examService.recalculate(id,req.user.sub);
+  }
+
+  @Post(':id/recalculate')
+  @Roles(Role.ADMIN)
+  recalculate(@Param('id') id: string,@Body('changes') changes:any[],@Req() req:any) {
+    if (!Array.isArray(changes)) throw new BadRequestException();
+    return this.examService.recalculate(id,req.user.sub,changes);
+  }
+
+  @Get(':id/control')
+  @Roles(Role.ADMIN)
+  control(@Param('id') id: string) {
+    return this.examService.control(id);
+  }
+
+  @Post(':id/teacher')
+  @Roles(Role.ADMIN)
+  teacher(@Param('id') id: string, @Body('teacher') teacher:string) {
+    return this.examService.assignTeacher(id,teacher);
+  }
+
+  @Post(':id/control')
+  @Roles(Role.ADMIN)
+  schedule(@Param('id') id: string, @Body() body: any) {
+    return this.examService.schedule(id, body);
+  }
+
+  @Post(':id/unlock')
+  @Roles(Role.ADMIN)
+  unlock(@Param('id') id: string, @Body('session') session: string) {
+    return this.examService.unlock(id, session);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string, @Req() req: any) {
     const data = await this.examService.findById(id, req.user);
@@ -95,12 +132,13 @@ export class ExamController {
   }
 
   @Get(':id/questions')
+  @Roles(Role.ADMIN, Role.GURU)
   async getExamQuestions(@Param('id') examId: string, @Req() req: any) {
     return this.examService.getExamQuestions(examId, req.user);
   }
 
   @Put(':id')
-  @Roles(Role.ADMIN, Role.GURU)
+  @Roles(Role.ADMIN)
   async update(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
     return this.examService.update(id, {
       ...dto,
@@ -111,19 +149,20 @@ export class ExamController {
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN, Role.GURU)
+  @Roles(Role.ADMIN)
   async softDelete(@Param('id') id: string, @Req() req: any) {
     return this.examService.softDelete(id, req.user?.sub, req.user);
   }
 
   @Get(':id/students')
   @Roles(Role.ADMIN, Role.GURU)
-  async getStudents(@Param('id') examId: string) {
+  async getStudents(@Param('id') examId: string, @Req() req: any) {
+    await this.examService.assertCanAccessExam(examId, req.user);
     return this.examStudentsService.getExamStudents(examId);
   }
 
   @Post(':id/students')
-  @Roles(Role.ADMIN, Role.GURU)
+  @Roles(Role.ADMIN)
   async assignStudents(@Param('id') examId: string, @Body('studentIds') studentIds: string[], @Req() req: any) {
     const createdBy = req.user?.sub;
     return this.examStudentsService.assignStudents(examId, studentIds, createdBy);

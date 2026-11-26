@@ -3,6 +3,7 @@ export class User {
   name: string;
   userid: string; // NIS/NIK
   password: string;
+  must_change_password?: boolean;
   role: string;
   is_active: boolean;
   class_id?: string;

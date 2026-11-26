@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import React from "react";
 import formatDateOnly from "../../utils/formatDateOnly";
 import {
@@ -9,6 +10,7 @@ import PropTypes from "prop-types";
 import ActionMenu from "../ActionMenu";
 
 const StudentExamTable = ({ data, searchParams, setSearchParams }) => {
+  const hours = (exam) => exam.starts_at ? [exam.starts_at,exam.ends_at].map(at=>new Date(at).toLocaleTimeString("id-ID",{timeZone:"Asia/Jakarta",hour:"2-digit",minute:"2-digit"})).join(" - ")+" WIB" : "Perlu dilengkapi";
   const sort = searchParams.get("sort") || "title";
   const order = searchParams.get("order") || "asc";
 
@@ -99,7 +101,7 @@ const StudentExamTable = ({ data, searchParams, setSearchParams }) => {
                     {exam.type}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {formatDateOnly(exam.date)}
+                    {formatDateOnly(exam.date)}<br/>{hours(exam)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {exam.duration}
@@ -107,7 +109,7 @@ const StudentExamTable = ({ data, searchParams, setSearchParams }) => {
                   <td className="px-4 py-3 text-center">
                     {exam.is_submitted ? (
                       <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-[10px] font-bold">
-                        Sudah Dikerjakan
+                        <Link to={"/student/exam/"+exam.id}>Lihat bukti penerimaan</Link>
                       </span>
                     ) : (
                       <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold">
@@ -150,7 +152,7 @@ const StudentExamTable = ({ data, searchParams, setSearchParams }) => {
                     {index + 1}
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800 leading-tight pr-8">{exam.title}</h4>
+                    <h4 className="font-bold text-slate-800 leading-tight pr-8">{exam.title}</h4><p>{hours(exam)}</p>
                     <div className="flex items-center gap-2 mt-2">
                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] font-bold uppercase tracking-wider">
                          {exam.subject?.class_id || '-'}
@@ -180,16 +182,16 @@ const StudentExamTable = ({ data, searchParams, setSearchParams }) => {
                 <div>
                   <p className="text-[9px] uppercase tracking-widest text-slate-400 font-bold mb-1">Status</p>
                   {exam.is_submitted ? (
-                    <span className="text-[10px] font-bold text-green-600">Sudah Dikerjakan</span>
+                    <span className="text-[10px] font-bold text-green-600"><Link to={"/student/exam/"+exam.id}>Lihat bukti penerimaan</Link></span>
                   ) : (
                     <span className="text-[10px] font-bold text-amber-600">Belum Dikerjakan</span>
                   )}
                 </div>
                 <div className="flex items-end justify-end">
                   {!exam.is_submitted && (
-                    <button className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
+                    <Link to={"/student/exam/"+exam.id} className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
                       Kerjakan →
-                    </button>
+                    </Link>
                   )}
                 </div>
               </div>

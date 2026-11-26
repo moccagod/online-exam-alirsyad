@@ -1,5 +1,5 @@
 import {
-  Controller,
+  Controller, UseInterceptors, UploadedFile,
   Get,
   Post,
   Put,
@@ -12,6 +12,7 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { Role } from 'src/common/enums/role.enum';
@@ -26,6 +27,23 @@ import { UpdateQuestionnaireDto } from './dto/update-questionnaire.dto';
 @Roles(Role.ADMIN, Role.GURU)
 export class QuestionnaireController {
   constructor(private readonly questionnaireService: QuestionnaireService) {}
+
+  @Get('packages')
+  packages(@Param('examId') id: string, @Req() req: any) {
+    return this.questionnaireService.packages(id,req.user);
+  }
+
+  @Post('package')
+  link(@Param('examId') id: string, @Body('source') source: string, @Req() req: any) {
+    return this.questionnaireService.link(id,source,req.user);
+  }
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file',{limits:{fileSize:5*1024*1024}}))
+  import(@Param('examId') id: string, @UploadedFile() file: Express.Multer.File, @Query('save') save: string, @Req() req: any) {
+    if (!file?.originalname.toLowerCase().endsWith('.xlsx')) throw new BadRequestException('Pilih berkas .xlsx');
+    return this.questionnaireService.importWorkbook(id,req.user,file.buffer,save==='1');
+  }
 
   /** -------------------------
    * CREATE QUESTION

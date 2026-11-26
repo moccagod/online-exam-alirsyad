@@ -1,3 +1,4 @@
+import SessionControl from "./SessionControl";
 import React, { useState } from "react";
 import StudentsModal from "../StudentsModal";
 import formatDateOnly from "../../utils/formatDateOnly";
@@ -83,7 +84,7 @@ const ExamTable = ({ data, onRefresh, searchParams, setSearchParams, onEdit, onD
                   className="hover:bg-emerald-50 transition-all duration-150 border-b last:border-none"
                 >
                   <td className="px-4 py-3 text-center">{index + 1}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{exam.title}</td>
+                  <td className="px-4 py-3 font-medium text-gray-800">{exam.title}<SessionControl exam={exam} refresh={onRefresh}/></td>
                   <td className="px-4 py-3">{exam.subject?.name || "-"}</td>
                   <td className="px-4 py-3 text-center">
                     <span
@@ -138,7 +139,7 @@ const ExamTable = ({ data, onRefresh, searchParams, setSearchParams, onEdit, onD
                     {index + 1}
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800 leading-tight pr-8">{exam.title}</h4>
+                    <h4 className="font-bold text-slate-800 leading-tight pr-8">{exam.title}<SessionControl exam={exam} refresh={onRefresh}/></h4>
                     <div className="flex items-center gap-2 mt-2">
                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
                          exam.type === "REGULER" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"

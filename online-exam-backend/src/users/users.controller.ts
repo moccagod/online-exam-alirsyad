@@ -223,11 +223,9 @@ export class UsersController {
   }
 
   // ============================
-  // GENERATE NEW PASSWORD FOR ALL SISWA
-  // ============================
-  @Post('generate-password-siswa')
+  @Post(':id/initial-password')
   @Roles(Role.ADMIN)
-  async generatePasswordSiswa() {
-    return this.usersService.generateSamePasswordForAllSiswa();
+  issueInitialPassword(@Param('id') id: string) {
+    return this.usersService.issueInitialPassword(id);
   }
 }

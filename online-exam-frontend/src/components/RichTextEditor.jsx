@@ -17,6 +17,9 @@ const RichTextEditor = ({
 }) => {
   const editorHostRef = useRef(null);
   const quillRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const replacing = useRef(null);
   const fileInputRef = useRef(null);
   const mathFieldRef = useRef(null);
   const lastValueRef = useRef(value || "");
@@ -58,7 +61,7 @@ const RichTextEditor = ({
       const html = editor.root.innerHTML;
       const normalizedHtml = html === "<p><br></p>" ? "" : html;
       lastValueRef.current = normalizedHtml;
-      onChange(normalizedHtml);
+      onChangeRef.current(normalizedHtml);
     });
 
     quillRef.current = editor;
@@ -182,7 +185,10 @@ const RichTextEditor = ({
       if (!editor) return;
 
       const range = editor.getSelection(true);
-      editor.insertEmbed(range.index, "image", reader.result, "user");
+      const index = replacing.current ?? range.index;
+      if (replacing.current !== null) editor.deleteText(index, 1, "user");
+      replacing.current = null;
+      editor.insertEmbed(index, "image", reader.result, "user");
       editor.setSelection(range.index + 1, 0);
       event.target.value = "";
     };
@@ -208,7 +214,7 @@ const RichTextEditor = ({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => { replacing.current=null; fileInputRef.current?.click(); }}
           className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-emerald-50 hover:text-emerald-700"
         >
           Tambah Gambar
@@ -256,6 +262,12 @@ const RichTextEditor = ({
           onChange={handleImageChange}
         />
       </div>
+
+      {Array.from(quillRef.current?.root.querySelectorAll("img") || []).map((img,i) => <div key={i} className="flex gap-3 text-sm">
+        Gambar {i+1}
+        <button type="button" onClick={()=>{replacing.current=quillRef.current.getIndex(Quill.find(img));fileInputRef.current.click();}}>Ganti gambar</button>
+        <button type="button" onClick={()=>quillRef.current.deleteText(quillRef.current.getIndex(Quill.find(img)),1,"user")}>Hapus gambar</button>
+      </div>)}
 
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">

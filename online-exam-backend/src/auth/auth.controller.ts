@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req } from '@nestjs/common';
+import { Controller, Post, Body, Req, BadRequestException, Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -6,6 +6,15 @@ import { RegisterDto } from './dto/register.dto';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Post('incident')
+  incident(@Body() body: any) {
+    if (!/^[A-Z0-9]{6,16}$/.test(String(body.code)) ||
+      !['jadwal','mulai','kirim','halaman ujian','login/dashboard','login'].includes(body.stage) ||
+      !['Chrome Android','iPhone','Chrome','Lainnya'].includes(body.browser)) throw new BadRequestException();
+    Logger.warn({code:body.code,stage:body.stage,browser:body.browser},'PortalUjian');
+    return {received:true};
+  }
 
   @Post('login')
   async login(@Body() dto: LoginDto) {

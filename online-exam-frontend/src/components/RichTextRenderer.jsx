@@ -6,6 +6,7 @@ import { InlineMath, BlockMath } from "react-katex";
 const RichTextRenderer = ({ content, className = "", imageClassName = "" }) => {
   const [preview, setPreview] = useState(null);
 
+  const root = React.useRef(null);
   if (!content) return null;
 
   // Simple regex to find $...$ for inline and $$...$$ for block math
@@ -13,9 +14,11 @@ const RichTextRenderer = ({ content, className = "", imageClassName = "" }) => {
 
   return (
     <div
+      ref={root}
       className={`rich-text-content prose max-w-none prose-slate ${className}`}
       onClick={(event) => {
         if (event.target?.tagName === "IMG") {
+          event.preventDefault(); event.stopPropagation();
           setPreview({
             src: event.target.getAttribute("src"),
             alt: event.target.getAttribute("alt") || "Preview gambar soal",
@@ -38,10 +41,14 @@ const RichTextRenderer = ({ content, className = "", imageClassName = "" }) => {
           );
         }
       })}
+      {/<img\b/i.test(content) && <button type="button" className="text-sm text-emerald-700 underline" onClick={e=>{
+        e.preventDefault(); e.stopPropagation();
+        const img=root.current.querySelector(".rich-text-html img"); if(img) setPreview({src:img.src,alt:img.alt});
+      }}>Perbesar</button>}
       {preview && (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setPreview(null)}
+          onClick={e => { e.preventDefault(); e.stopPropagation(); setPreview(null); }}
         >
           <button
             type="button"

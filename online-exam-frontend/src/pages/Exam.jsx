@@ -1,3 +1,4 @@
+import {getUserFromToken} from "../utils/jwtHelper";
 import { useState, useEffect, Fragment } from "react";
 import { useSearchParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
@@ -234,7 +235,7 @@ const Exam = () => {
             </div>
             <h3 className="module-title">Daftar Ujian</h3>
           </div>
-          <button
+          {getUserFromToken()?.role === "ADMIN" && <button
             onClick={() => {
               resetForm();
               setShowModal(true);
@@ -242,7 +243,7 @@ const Exam = () => {
             className="module-action-btn bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white transition-all"
           >
             + Tambah Ujian
-          </button>
+          </button>}
         </div>
 
         {/* Table Section */}

@@ -1,6 +1,6 @@
 import {
   Controller,
-  Post,
+  Post, Body,
   Param,
   UploadedFile,
   BadRequestException,
@@ -11,13 +11,17 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
 import { ExamSessionService } from './exam-session.service';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Role } from '../common/enums/role.enum';
 import type { Request } from 'express';
 
 const maxVideoUploadBytes =
   Number(process.env.MAX_EXAM_VIDEO_UPLOAD_MB || 45) * 1024 * 1024;
 
 @Controller('exam-sessions')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles(Role.SISWA)
 export class ExamSessionController {
   constructor(private readonly examSessionService: ExamSessionService) {}
 
@@ -51,36 +55,20 @@ export class ExamSessionController {
   /**
    * Memulai sesi ujian (dibuat 1x per siswa per ujian)
    */
+  @Post(':examId/prepare')
+  prepare(@Param('examId') id: string, @Body('token') token: string, @Req() req: any) {
+    return this.examSessionService.prepare(id, req.user.sub, token, false);
+  }
+
   @Post(':examId/start')
-  async startSession(@Param('examId') examId: string, @Req() req: Request) {
-    const user = (req as any).user;
-    const studentId = user?.sub;
-
-    if (!studentId) {
-      throw new BadRequestException('User tidak terautentikasi');
-    }
-
-    return this.examSessionService.startSession(examId, studentId);
+  start(@Param('examId') id: string, @Body('token') token: string, @Req() req: any) {
+    return this.examSessionService.prepare(id, req.user.sub, token, true);
   }
 
-  /**
-   * Tambah counter tab-switch (diperoleh dari FE anti-cheat)
-   */
-  @Post(':sessionId/tab-switch')
-  async incrementTabSwitch(@Param('sessionId') sessionId: string) {
-    return this.examSessionService.incrementTabSwitch(sessionId);
+  @Post(':sessionId/:action')
+  attempt(@Param('sessionId') id: string, @Param('action') action: string, @Body() body: any, @Req() req: any) {
+    if (!['draft','violation','review'].includes(action)) throw new BadRequestException();
+    return this.examSessionService.attempt(id, req.user.sub, action, body);
   }
 
-  /**
-   * Menandai sesi sebagai selesai
-   */
-  @Post(':sessionId/finish')
-  async finishSession(@Param('sessionId') sessionId: string) {
-    return this.examSessionService.finishSession(sessionId);
-  }
-
-  @Post(':sessionId/disqualify')
-  async disqualifySession(@Param('sessionId') sessionId: string) {
-    return this.examSessionService.disqualifySession(sessionId);
-  }
 }

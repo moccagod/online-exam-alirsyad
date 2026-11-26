@@ -15,7 +15,7 @@ export class ExamStudentsService {
       .from('exam_students')
       .select(`
         *,
-        student:users (*)
+        student:users (id,name,userid,class_id,class_name)
       `)
       .eq('exam_id', examId)
       .is('deleted_at', null);

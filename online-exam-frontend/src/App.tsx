@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useEffect } from "react";
+import { lazy, useEffect } from "react";
 import ProtectedRoute from "./routes/ProtectedRoutes";
 import { startVideoUploadQueue } from "./utils/backgroundVideoUpload";
 
@@ -17,7 +17,7 @@ import StudentExamPage from "./pages/StudentExamPage.jsx";
 import TeacherExam from "./pages/TeacherExam.jsx";
 import TeacherExamStudents from "./pages/TeacherExamStudents.jsx";
 import TeacherExamScoring from "./pages/TeacherExamScoring.jsx";
-import Questionnaire from "./pages/Questionnaire.jsx";
+const Questionnaire = lazy(() => import("./pages/Questionnaire.jsx"));
 import Subject from "./pages/Subject.jsx";
 import Reports from "./pages/Reports.jsx";
 import Classes from "./pages/Classes.jsx";

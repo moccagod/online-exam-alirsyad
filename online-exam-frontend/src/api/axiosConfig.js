@@ -1,4 +1,6 @@
 // src/api/axiosConfig.js
+import { jwtDecode } from "jwt-decode";
+const getUserFromToken = () => { try { return jwtDecode(localStorage.getItem("token")); } catch {return null;} };
 import axios from "axios";
 import Swal from "sweetalert2";
 
@@ -15,7 +17,7 @@ const getFriendlyErrorMessage = (status, config, error) => {
   if (error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT") {
     return "Koneksi terlalu lama. Jawaban mungkin belum terkonfirmasi, silakan coba kirim lagi.";
   }
-  if (status === 400) return "Data belum sesuai. Silakan periksa kembali isian Anda.";
+  if (status === 400) return (typeof error.response?.data?.message === "string" && error.response.data.message) || "Data belum sesuai. Silakan periksa kembali isian Anda.";
   if (status === 401 && isLoginRequest(config)) return "ID Pengguna atau Kata Sandi salah.";
   if (status === 401) return "Sesi Anda telah berakhir. Silakan login kembali.";
   if (status === 403) return "Anda tidak memiliki akses untuk melakukan aksi ini.";
@@ -51,6 +53,7 @@ axiosInstance.interceptors.response.use(
     error.message = friendlyMessage;
 
     if (status === 401 && !isLoginRequest(error.config) && !error.config?.skipAuthRedirect) {
+      if (/^\/student\/exam\/[\w-]+$/.test(window.location.pathname)) sessionStorage.setItem("resumeExam", JSON.stringify({path:window.location.pathname, tokenUser: getUserFromToken()?.sub}));
       localStorage.removeItem("token");
       if (window.location.pathname !== "/") {
         Swal.fire({

@@ -1,4 +1,7 @@
-import { ForbiddenException, Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import {assignedExams} from './teacher-assignments';
+import { grade, gradingWeights } from "./grade";
+import { randomBytes } from "crypto";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { Exam } from './entities/exam.entity';
 import type { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
@@ -8,6 +11,70 @@ import { UpdateExamDto } from './dto/update-exam.dto';
 @Injectable()
 export class ExamService {
   constructor(private readonly supabase: SupabaseClient) {}
+
+  async recalculate(id: string, operator: string, expected?: any[]) {
+    const [history, result, archive, weights] = await Promise.all([
+      this.supabase.from('exam_version_questions').select('*').eq('exam_id',id),
+      this.supabase.from('exam_submissions').select('id,student_id,created_at,answers,score,student:users(name)').eq('exam_id',id).order('id'),
+      this.supabase.from('exam_delivery').select('mc_weight').eq('exam_id',id).maybeSingle(),
+      gradingWeights(this.supabase,id)
+    ]);
+    for (const response of [history,result,archive]) if(response.error) throw new InternalServerErrorException(response.error.message);
+    const all = history.data || [];
+    const changes: {id:string; student:unknown; old:number; proposed:number|null}[] = [];
+    for (const row of result.data || []) {
+      if (row.score==null) continue;
+      const uncertain = archive.data?.mc_weight == null && (!all.length || all.some(q=>
+        [q.created_at,q.updated_at,q.deleted_at].some(at=>at && Date.parse(at)>Date.parse(row.created_at))) ||
+        !Array.isArray(row.answers) || row.answers.some(a=>!all.some(q=>q.id===a.question_id)) ||
+        all.some(q=>q.type==='essay'));
+      const proposed = uncertain ? null : grade(all.filter(q=>!q.deleted_at),row.answers,weights).totalScore;
+      const student = Array.isArray(row.student) ? row.student[0] : row.student;
+      changes.push({id:row.id,student,old:row.score,proposed});
+    }
+    const affected = changes.filter(c=>c.proposed!==null && c.proposed!==c.old);
+    if (expected) {
+      if (JSON.stringify(expected)!==JSON.stringify(affected.map(({id,old,proposed})=>({id,old,proposed})))) {
+        throw new BadRequestException('Nilai berubah. Buka pratinjau kembali.');
+      }
+      const {error} = await this.supabase.rpc('exam_correct_scores',{p_exam:id,p_operator:operator,p_changes:expected});
+      if (error) throw new BadRequestException(error.message);
+    }
+    return {changes,affected:affected.length};
+  }
+
+  async control(id: string) {
+    const {data: config,error} = await this.supabase.from('exam_delivery').select('token').eq('exam_id',id).maybeSingle();
+    if (error) throw new InternalServerErrorException(error.message);
+    const attempts = await this.supabase.from('exam_sessions')
+      .select('id,status,events,needs_review,student:users(name,userid)').eq('exam_id',id).eq('managed',true);
+    if (attempts.error) throw new InternalServerErrorException(attempts.error.message);
+    return { token: config?.token, attempts: attempts.data };
+  }
+
+  async assignTeacher(id: string, teacher: string) {
+    const {data} = await this.supabase.from('users').select('id').eq('id',teacher).eq('role','GURU').is('deleted_at',null).single();
+    if (!data) throw new BadRequestException('Guru tidak tersedia');
+    const {error} = await this.supabase.from('exams').update({assigned_teacher_id:teacher,package_exam_id:null}).eq('id',id);
+    if (error) throw new BadRequestException(error.message);
+    return {teacher};
+  }
+
+  async schedule(id: string, body: any) {
+    if (!(Date.parse(body.ends_at) > Date.parse(body.starts_at))) throw new BadRequestException('Periksa jam mulai dan selesai');
+    const token = randomBytes(6).toString('hex').toUpperCase();
+    const {error} = await this.supabase.rpc('exam_schedule',{p_exam:id,p_open:body.starts_at,p_close:body.ends_at,p_token:token});
+    if (error) throw new BadRequestException(error.message);
+    return {token};
+  }
+
+  async unlock(id: string, session: string) {
+    const row = await this.supabase.from('exam_sessions').select('student_id').eq('id',session).eq('exam_id',id).single();
+    if (!row.data) throw new NotFoundException();
+    const {error} = await this.supabase.rpc('exam_attempt',{p_session:session,p_student:row.data.student_id,p_action:'unlock',p_body:{}});
+    if (error) throw new BadRequestException(error.message);
+    return {success:true};
+  }
 
   private normalizeExamDate(date: string | Date): string {
     const raw = String(date ?? '').trim();
@@ -133,26 +200,14 @@ export class ExamService {
     if (role === 'ADMIN') return exam;
 
     if (role === 'GURU') {
-      if (subject?.teacher_id === user?.sub) return exam;
+      if ((exam.assigned_teacher_id ?? subject?.teacher_id) === user?.sub) return exam;
       throw new ForbiddenException('Anda tidak memiliki akses ke ujian ini');
     }
 
     if (role === 'SISWA') {
-      const { data: student, error } = await this.supabase
-        .from('users')
-        .select('class_id, class_name')
-        .eq('id', user?.sub)
-        .is('deleted_at', null)
-        .single();
-
-      if (error || !student) throw new ForbiddenException('Data siswa tidak ditemukan');
-
-      const studentClasses = [student.class_id, student.class_name]
-        .filter(Boolean)
-        .map((value) => this.normalizeClassIdentifier(value));
-      const subjectClass = this.normalizeClassIdentifier(subject?.class_id);
-
-      if (studentClasses.includes(subjectClass)) return exam;
+      const {data,error} = await this.supabase.from('exam_students').select('id')
+        .eq('student_id',user.sub).eq('exam_id',examId).is('deleted_at',null).limit(1).maybeSingle();
+      if (!error && data) return exam;
       throw new ForbiddenException('Ujian ini tidak tersedia untuk kelas Anda');
     }
 
@@ -245,15 +300,7 @@ export class ExamService {
     }
 
     if (String(user?.role || '').toUpperCase() === 'GURU') {
-      const { data: subjects, error: subjectError } = await this.supabase
-        .from('subjects')
-        .select('id')
-        .eq('teacher_id', user.sub)
-        .is('deleted_at', null);
-
-      if (subjectError) throw new InternalServerErrorException(subjectError.message);
-
-      const subjectIds = (subjects || []).map((subject) => subject.id);
+      const subjectIds = (await assignedExams(this.supabase,user.sub)).map(e=>e.id);
       if (subjectIds.length === 0) {
         return {
           data: [],
@@ -261,7 +308,7 @@ export class ExamService {
         };
       }
 
-      query = query.in('subject_id', subjectIds);
+      query = query.in('id', subjectIds);
     }
 
     const { data, count, error } = await query
@@ -296,7 +343,7 @@ export class ExamService {
       };
     }
 
-    return mapExamRow(await this.assertCanAccessExam(id, user));
+    return {...mapExamRow(await this.assertCanAccessExam(id, user)), server_time:new Date().toISOString()} as Exam;
   }
 
   async update(id: string, dto: UpdateExamDto, user?: any): Promise<Exam> {
@@ -466,89 +513,11 @@ export class ExamService {
       day: '2-digit',
     }).format(now);
 
-    // 1. Ambil data student (untuk tahu kelasnya)
-    const { data: student, error: stuError } = await this.supabase
-      .from('users')
-      .select('id, userid, name, role, class_id, class_name, deleted_at')
-      .eq('id', studentId)
-      .is('deleted_at', null)
-      .single();
-
-    if (stuError || !student) throw new NotFoundException('Student not found');
-
-    const rawClassIdentifiers = [student.class_id, student.class_name].filter(Boolean);
-    const classIdentifiers = new Set(
-      rawClassIdentifiers.map((value) => this.normalizeClassIdentifier(value)).filter(Boolean),
-    );
-
-    if (classIdentifiers.size === 0) {
-      return {
-        data: [],
-        meta: {
-          total: 0,
-          page,
-          limit,
-          totalPages: 0,
-          ...(debug ? {
-            debug: {
-              reason: 'student_class_empty',
-              today: todayStr,
-              authStudentId: studentId,
-              student,
-            },
-          } : {}),
-        },
-      };
-    }
-
-    // 2. Ambil subject, lalu cocokkan kelas secara ternormalisasi agar beda case/spasi tidak membuat kosong.
-    const { data: subjects, error: subjectError } = await this.supabase
-      .from('subjects')
-      .select('id, name, class_id')
-      .is('deleted_at', null);
-
-    if (subjectError) throw new InternalServerErrorException(subjectError.message);
-
-    const validSubjects = (subjects || []).filter((subject) =>
-      classIdentifiers.has(this.normalizeClassIdentifier(subject.class_id)),
-    );
-
-    const subjectIds = validSubjects.map(s => s.id);
-    if (subjectIds.length === 0) {
-      return {
-        data: [],
-        meta: {
-          total: 0,
-          page,
-          limit,
-          totalPages: 0,
-          ...(debug ? {
-            debug: {
-              reason: 'no_matching_subjects_for_student_class',
-              today: todayStr,
-              authStudentId: studentId,
-              student,
-              normalizedClassIdentifiers: Array.from(classIdentifiers),
-              subjectsRead: subjects?.length ?? 0,
-              sampleSubjects: (subjects || []).slice(0, 10),
-            },
-          } : {}),
-        },
-      };
-    }
-
-    const subjectById = new Map(validSubjects.map((subject) => [subject.id, subject]));
-
-    // 3. Ambil kandidat exams dari subject yang sesuai. Tanggal difilter di aplikasi
-    // supaya aman untuk format Supabase "YYYY-MM-DD 00:00:00" maupun ISO string.
-    const { data: candidateExams, error } = await this.supabase
-      .from('exams')
-      .select('*')
-      .is('deleted_at', null)
-      .in('subject_id', subjectIds);
-
+    const {data: rows,error} = await this.supabase.from('exam_students')
+      .select('exam:exams!inner(*,subject:subjects(id,name,class_id))').eq('student_id',studentId)
+      .is('deleted_at',null).is('exam.deleted_at',null).eq('exam.date',todayStr);
     if (error) throw new InternalServerErrorException(error.message);
-
+    const candidateExams: any[] = (rows || []).flatMap(row => row.exam || []);
     const searchTerm = search.trim().toLowerCase();
     const todayExams = (candidateExams || []).filter((exam) => {
       const isToday = this.getDatePart(exam.date) === todayStr;
@@ -584,7 +553,6 @@ export class ExamService {
 
     const finalData = (exams || []).map(e => ({
       ...e,
-      subject: subjectById.get(e.subject_id) || null,
       is_submitted: submittedExamIds.has(e.id),
     }));
 
@@ -595,24 +563,6 @@ export class ExamService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
-        ...(debug ? {
-          debug: {
-            reason: total > 0 ? 'ok' : 'no_exam_with_today_date',
-            today: todayStr,
-            authStudentId: studentId,
-            student,
-            normalizedClassIdentifiers: Array.from(classIdentifiers),
-            matchingSubjects: validSubjects,
-            candidateExamCount: candidateExams?.length ?? 0,
-            candidateExams: (candidateExams || []).map((exam) => ({
-              id: exam.id,
-              title: exam.title,
-              date: exam.date,
-              datePart: this.getDatePart(exam.date),
-              subject_id: exam.subject_id,
-            })),
-          },
-        } : {}),
       },
     };
   }

@@ -54,7 +54,6 @@ const Users = () => {
   const [deletingId, setDeletingId] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
-  const [generatingToken, setGeneratingToken] = useState(false);
   const [importing, setImporting] = useState(false);
 
   const search = searchParams.get("search") || "";
@@ -239,35 +238,14 @@ const Users = () => {
     }
   };
 
-  const handleGenerateRandomToken = async () => {
-    if (generatingToken) return;
+  const issuePassword = async () => {
+    const confirmation = await MySwal.fire({ title: "Terbitkan kata sandi awal?", text: formData.name, showCancelButton: true });
+    if (!confirmation.isConfirmed) return;
     try {
-      MySwal.fire({
-        title: "Apakah Anda yakin?",
-        text: "Token siswa akan diacak ulang.",
-        icon: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Ya, acak!",
-        cancelButtonText: "Batal",
-        reverseButtons: true,
-      }).then(async (result) => {
-        if (result.isConfirmed) {
-          setGeneratingToken(true);
-          const res = await api.post(`/users/generate-password-siswa`, {}, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-
-          console.log(res.data);
-          
-          
-          MySwal.fire("Berhasil!", "Token berhasil diacak menjadi "+res.data.password, "success");
-        }
-      }).finally(() => {
-        setGeneratingToken(false);
-      });
-    } catch (err) {
-      setGeneratingToken(false);
-      MySwal.fire("Gagal!", "Gagal mengacak token.", "error");
+      const { data } = await api.post("/users/" + formData.id + "/initial-password");
+      await MySwal.fire({ title: "Bagikan secara pribadi kepada siswa", text: data.password });
+    } catch {
+      MySwal.fire("Gagal menerbitkan kata sandi", "", "error");
     }
   };
 
@@ -547,9 +525,9 @@ const Users = () => {
                   />
                 </div>
 
-                {/* Password / Token */}
+                <button type="button" onClick={issuePassword} className="text-emerald-700 underline">Terbitkan kata sandi awal</button>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Password / Token Baru</label>
+                  <label className="block text-sm font-medium text-gray-700">Kata sandi baru</label>
                   <input
                     type="password"
                     name="password"
@@ -816,14 +794,6 @@ const Users = () => {
             >
               + Tambah User
             </button>
-            <LoadingButton
-              onClick={handleGenerateRandomToken}
-              loading={generatingToken}
-              loadingText="Mengacak..."
-              className="module-action-btn bg-red-600 hover:bg-red-700 text-white transition-colors duration-200"
-            >
-              Acak Token
-            </LoadingButton>
           </div>
         </div>
 

@@ -1,3 +1,4 @@
+import {incident} from "../components/Recovery";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axiosConfig";
@@ -7,6 +8,8 @@ import { getUserFromToken } from "../utils/jwtHelper";
 const Login = () => {
   const [userid, setUserid] = useState("");
   const [password, setPassword] = useState("");
+  const [changeRequired, setChangeRequired] = useState(false);
+  const [replacement, setReplacement] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -33,13 +36,17 @@ const Login = () => {
       const res = await api.post("/auth/login", {
         userid: String(userid).trim(),
         password: String(password),
+        ...(changeRequired && {new_password: replacement}),
       });
 
+      if (res.data.must_change_password) { setChangeRequired(true); return; }
       localStorage.setItem("token", res.data.access_token);
-      navigate("/dashboard");
+      const resume = JSON.parse(sessionStorage.getItem("resumeExam") || "null");
+      sessionStorage.removeItem("resumeExam");
+      navigate(resume?.tokenUser === getUserFromToken()?.sub && /^\/student\/exam\/[\w-]+$/.test(resume.path) ? resume.path : "/dashboard");
     } catch (err) {
-      console.error("Login gagal:", err);
-      setError(err.response?.data?.message || "Login gagal, silakan periksa kembali kredensial Anda.");
+      const code = err.response?.status===401 ? "" : " - " + incident("login");
+      setError((err.response?.data?.message || "Login gagal. Coba lagi.") + code);
     } finally {
       setLoading(false);
     }
@@ -110,6 +117,7 @@ const Login = () => {
           )}
 
           <form onSubmit={handleLogin} className="space-y-6">
+            {changeRequired && <label className="block">Ganti kata sandi awal<input type="password" autoComplete="new-password" required minLength={8} className="block w-full border rounded p-3" value={replacement} onChange={e => setReplacement(e.target.value)} /></label>}
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700 uppercase tracking-wider ml-1">ID Pengguna / NIS</label>
               <div className="relative group">

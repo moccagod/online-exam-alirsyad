@@ -1,3 +1,5 @@
+import {assignedExams} from './teacher-assignments';
+import { grade, gradingWeights } from "./grade";
 import {
   BadRequestException,
   ForbiddenException,
@@ -58,6 +60,7 @@ export class TeacherExamsService {
   }
 
   private clampScore(value: unknown) {
+    if (value == null || value === "") return null;
     const score = Number(value);
     if (!Number.isFinite(score)) return null;
     return Math.max(0, Math.min(100, Math.round(score)));
@@ -126,7 +129,7 @@ export class TeacherExamsService {
   private async assertTeacherCanAccessExam(examId: string, user?: any) {
     const { data: exam, error } = await this.supabase
       .from('exams')
-      .select('id, title, subject_id, multiple_choice_weight, essay_weight, subject:subjects(id, name, class_id, teacher_id)')
+      .select('id, title, subject_id, assigned_teacher_id, multiple_choice_weight, essay_weight, subject:subjects(id, name, class_id, teacher_id)')
       .eq('id', examId)
       .is('deleted_at', null)
       .single();
@@ -135,7 +138,7 @@ export class TeacherExamsService {
     if (String(user?.role || '').toUpperCase() !== 'GURU') return exam;
 
     const subject = Array.isArray(exam.subject) ? exam.subject[0] : exam.subject;
-    if (subject?.teacher_id !== user.sub) {
+    if ((exam.assigned_teacher_id ?? subject?.teacher_id) !== user.sub) {
       throw new ForbiddenException('Anda tidak memiliki akses ke ujian ini');
     }
 
@@ -158,18 +161,10 @@ export class TeacherExamsService {
     const to = from + limit - 1;
 
     try {
-      let allowedSubjectIds: string[] | null = null;
+      let allowedExamIds: string[] | null = null;
       if (String(user?.role || '').toUpperCase() === 'GURU') {
-        const { data: subjects, error: subjectError } = await this.supabase
-          .from('subjects')
-          .select('id')
-          .eq('teacher_id', user.sub)
-          .is('deleted_at', null);
-
-        if (subjectError) throw new InternalServerErrorException(subjectError.message);
-
-        allowedSubjectIds = (subjects || []).map((subject) => subject.id);
-        if (!allowedSubjectIds.length) {
+        allowedExamIds = (await assignedExams(this.supabase,user.sub)).map(e=>e.id);
+        if (!allowedExamIds.length) {
           return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
         }
       }
@@ -193,8 +188,8 @@ export class TeacherExamsService {
           )
         `);
 
-      if (allowedSubjectIds) {
-        query = query.in('exams.subject_id', allowedSubjectIds);
+      if (allowedExamIds) {
+        query = query.in('exam_id', allowedExamIds);
       }
 
       const { data: submissions, error } = await query.order('created_at', { ascending: false });
@@ -281,7 +276,7 @@ export class TeacherExamsService {
 
       // 2️⃣ Ambil semua student terkait
       const { data: questions, error: questionError } = await this.supabase
-        .from('questionnaires')
+        .from('exam_version_questions')
         .select('id, type')
         .eq('exam_id', examId)
         .is('deleted_at', null);
@@ -390,8 +385,10 @@ export class TeacherExamsService {
         subject = subj;
       }
 
+      const weights = await gradingWeights(this.supabase,submission.exam_id);
       const exam = {
         ...examRaw,
+        multiple_choice_weight: weights.mc_weight, essay_weight: weights.essay_weight,
         subject,
       };
 
@@ -401,7 +398,7 @@ export class TeacherExamsService {
       );
 
       const { data: questions, error: questionError } = await this.supabase
-        .from('questionnaires')
+        .from('exam_version_questions')
         .select('*')
         .eq('exam_id', submission.exam_id)
         .is('deleted_at', null)
@@ -549,72 +546,17 @@ export class TeacherExamsService {
       }
 
       const { data: questions, error: questionError } = await this.supabase
-        .from('questionnaires')
-        .select('id, type')
+        .from('exam_version_questions')
+        .select('id, type, answer')
         .eq('exam_id', submission.exam_id)
         .is('deleted_at', null);
 
       if (questionError) throw new InternalServerErrorException(questionError.message);
 
-      const multipleChoiceIds = (questions || [])
-        .filter((question) => question.type === 'multiple_choice')
-        .map((question) => String(question.id));
-      const essayQuestionIds = (questions || [])
-        .filter((question) => question.type !== 'multiple_choice')
-        .map((question) => String(question.id));
-      const correctMultipleChoiceCount = multipleChoiceIds.filter((questionId) => {
-        const answer = updatedAnswers.find((item) => String(item.question_id) === questionId);
-        return answer?.is_correct === true;
-      }).length;
-
-      const multipleChoiceScore = multipleChoiceIds.length
-        ? Math.round((correctMultipleChoiceCount / multipleChoiceIds.length) * 100)
-        : null;
-
-      const { data: examForScoring, error: examWeightError } = await this.supabase
-        .from('exams')
-        .select('multiple_choice_weight, essay_weight')
-        .eq('id', submission.exam_id)
-        .single();
-
-      if (examWeightError) throw new InternalServerErrorException(examWeightError.message);
-
-      const essayQuestionScores = essayQuestionIds.map((questionId) => {
-        const answer = updatedAnswers.find((item) => String(item.question_id) === questionId);
-        return this.clampScore(answer?.essay_score);
-      });
-
-      if (essayQuestionScores.some((score) => score === null)) {
-        throw new BadRequestException('Setiap jawaban essay wajib diberi nilai 0 sampai 100');
-      }
-
-      const validEssayQuestionScores = essayQuestionScores as number[];
-      const totalEssayScore = validEssayQuestionScores.reduce((sum, score) => sum + score, 0);
-      const essayScore = validEssayQuestionScores.length
-        ? Math.round(totalEssayScore / validEssayQuestionScores.length)
-        : null;
-
-      const scoreComponents = [
-        {
-          score: multipleChoiceScore,
-          weight: this.normalizeScoreWeight(examForScoring?.multiple_choice_weight, 50),
-        },
-        {
-          score: essayScore,
-          weight: this.normalizeScoreWeight(examForScoring?.essay_weight, 50),
-        },
-      ].filter((component): component is { score: number; weight: number } => component.score !== null);
-      const activeWeightTotal = scoreComponents.reduce((sum, component) => sum + component.weight, 0);
-      const calculatedScore = scoreComponents.length
-        ? Math.round(
-            scoreComponents.reduce((sum, component) => sum + component.score * component.weight, 0) /
-              (activeWeightTotal || scoreComponents.length),
-          )
-        : Math.max(0, Math.min(100, Math.round(Number(totalScore || 0))));
-
-      const answersForStorage = updatedAnswers.filter(
-        (answer) => String(answer?.question_id) !== '__essay_score__',
+      const {scoredAnswers: answersForStorage, totalScore: calculatedScore} = grade(
+        questions || [], updatedAnswers, await gradingWeights(this.supabase,submission.exam_id), true
       );
+      if (calculatedScore === null) throw new BadRequestException('Nilai esai yang terisi belum lengkap');
 
       const { data, error: updateError } = await this.supabase
         .from('exam_submissions')
