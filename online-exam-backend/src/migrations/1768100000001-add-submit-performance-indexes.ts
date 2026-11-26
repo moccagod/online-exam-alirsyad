@@ -1,9 +1,14 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddSubmitPerformanceIndexes1768100000000 implements MigrationInterface {
-  name = 'AddSubmitPerformanceIndexes1768100000000';
+export class AddSubmitPerformanceIndexes1768100000001 implements MigrationInterface {
+  name = 'AddSubmitPerformanceIndexes1768100000001';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE "exam_submissions"
+        ADD COLUMN IF NOT EXISTS "session_id" uuid
+    `);
+
     await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS "IDX_exam_submissions_exam_student"
       ON "exam_submissions" ("exam_id", "student_id")

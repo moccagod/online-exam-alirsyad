@@ -65,8 +65,8 @@ const Login = () => {
             <span className="text-3xl font-black">A</span>
           </div>
           <h1 className="text-5xl font-black tracking-tight leading-tight mb-6">
-            Sistem Ujian Online <br />
-            <span className="text-emerald-400">Terintegrasi</span>
+            SMK AL IRSYAD <br />
+            <span className="text-emerald-400">Computer Based Test</span>
           </h1>
           <p className="text-xl text-slate-300 leading-relaxed font-medium">
             Platform asesmen modern untuk mendukung kemajuan akademik siswa secara transparan dan efisien.
