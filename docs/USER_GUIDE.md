@@ -1,6 +1,6 @@
 # USER GUIDE Aplikasi Online Exam Al Irsyad
 
-Dokumen ini menjelaskan alur penggunaan aplikasi secara **end-to-end**: mulai dari registrasi, login, manajemen data master, pembuatan ujian, pengerjaan ujian oleh siswa, penilaian guru, hingga pelaporan.
+Dokumen ini menjelaskan alur penggunaan aplikasi secara **end-to-end**: mulai dari memperoleh akun, login, manajemen data master, pembuatan ujian, pengerjaan ujian oleh siswa, penilaian guru, hingga pelaporan.
 
 ---
 
@@ -16,24 +16,11 @@ Menu yang tampil menyesuaikan role akun yang login.
 
 ---
 
-## 2) Alur Awal: Register & Login
+## 2) Alur Awal: Akun & Login
 
-## 2.1 Register Akun
+## 2.1 Memperoleh Akun
 
-1. Buka halaman **Register** (`/register`).
-2. Isi field:
-   - **Name** (nama lengkap)
-   - **Role** (SISWA / GURU / ADMIN)
-   - **NIS** (jika role = SISWA)
-   - **NIK** (jika role = GURU/ADMIN)
-   - **Password**
-3. Klik tombol **Register**.
-4. Jika berhasil:
-   - Sistem langsung melakukan login otomatis.
-   - Token login disimpan di browser.
-   - Pengguna diarahkan ke halaman **Dashboard**.
-
-> Catatan: Jika ada field wajib yang kosong, sistem menampilkan pesan error.
+Pendaftaran mandiri tidak tersedia. Akun siswa, guru, dan admin dibuat oleh admin/operator sekolah melalui menu manajemen pengguna. Jika belum memiliki akun atau mengalami kendala akun, hubungi admin/operator sekolah.
 
 ## 2.2 Login
 

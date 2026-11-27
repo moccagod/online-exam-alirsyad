@@ -25,6 +25,5 @@ Lalu isi nilai sesuai environment Anda.
 
 ## Catatan struktur saat ini
 
-- Folder dan file utama frontend sudah ada (`src/components`, `src/pages`, `src/services`, `src/api`, `supabase`).
+- Folder dan file utama frontend sudah ada (`src/components`, `src/pages`, `src/api`, `supabase`).
 - Belum ada test otomatis (unit/integration/e2e) pada repo ini.
-- `src/services/authService.js` berisi logika autentikasi client-side yang sebaiknya dipindah ke backend bila digunakan di production.

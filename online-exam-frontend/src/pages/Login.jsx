@@ -52,8 +52,6 @@ const Login = () => {
     }
   };
 
-  const handleRegister = () => navigate("/register");
-
   return (
     <div className="flex min-h-screen bg-slate-50 font-poppins overflow-hidden">
       {/* Visual Section */}
@@ -124,6 +122,7 @@ const Login = () => {
                 </div>
                 <input
                   type="text"
+                  autoComplete="username"
                   placeholder="Masukkan NIS / NIK"
                   className="w-full py-4 pl-12 pr-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 focus:bg-white outline-none transition-all font-semibold text-slate-700"
                   value={userid}
@@ -141,6 +140,7 @@ const Login = () => {
                 </div>
                 <input
                   type="password"
+                  autoComplete="current-password"
                   placeholder="Masukkan Password"
                   className="w-full py-4 pl-12 pr-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 focus:bg-white outline-none transition-all font-semibold text-slate-700"
                   value={password}
@@ -176,14 +176,9 @@ const Login = () => {
           </form>
 
           <div className="mt-10 text-center">
-            <p className="text-slate-500 font-bold">
-              Belum memiliki akun?{" "}
-              <span
-                className="text-emerald-600 hover:text-emerald-700 cursor-pointer transition-colors"
-                onClick={handleRegister}
-              >
-                Daftar Baru
-              </span>
+            <p className="text-sm font-semibold leading-relaxed text-slate-500">
+              Belum memiliki akun atau mengalami kendala akun?{" "}
+              <span className="text-emerald-700">Hubungi admin/operator sekolah.</span>
             </p>
           </div>
         </div>

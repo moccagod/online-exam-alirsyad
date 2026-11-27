@@ -1,10 +1,9 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, useEffect } from "react";
 import ProtectedRoute from "./routes/ProtectedRoutes";
 
 // Importing the pages
 import Login from "./pages/Login.jsx";
-import Register from "./pages/Register.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 
 import Users from "./pages/Users.jsx";
@@ -31,7 +30,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/register" element={<Navigate to="/" replace />} />
         <Route
           path="/dashboard"
           element={
