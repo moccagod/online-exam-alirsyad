@@ -9,23 +9,23 @@ export class SubjectService {
   constructor(private readonly supabase: SupabaseClient) {}
 
   async create(dto: CreateSubjectDto): Promise<Subject> {
-    // CHECK DUPLICATE
+    const name = String(dto.name || '').trim();
     const { data: existing, error: checkError } = await this.supabase
       .from('subjects')
       .select('id')
-      .eq('name', dto.name)
-      .eq('class_id', dto.class_id)
+      .ilike('name', name)
       .is('deleted_at', null)
+      .is('canonical_subject_id', null)
       .maybeSingle();
 
     if (checkError) throw new InternalServerErrorException(checkError.message);
     if (existing) {
-      throw new BadRequestException(`Mata pelajaran ${dto.name} untuk kelas tersebut sudah ada!`);
+      throw new BadRequestException(`Mata pelajaran ${name} sudah ada.`);
     }
 
     const { data, error } = await this.supabase
       .from('subjects')
-      .insert([{ ...dto }])
+      .insert([{ name, description: dto.description || null, created_by: dto.created_by, class_id: null, teacher_id: null }])
       .select()
       .single();
 
@@ -47,16 +47,25 @@ export class SubjectService {
     try {
       let query = this.supabase
         .from('subjects')
-        .select('*, teacher:teacher_id(name)', { count: 'exact' })
-        .is('deleted_at', null);
+        .select('*, assignments:teaching_assignments!subject_id(id,class_id,teacher_id,deleted_at,teacher:users!teacher_id(id,name,is_active),class:classes!class_id(id,name,grade))', { count: 'exact' })
+        .is('deleted_at', null)
+        .is('canonical_subject_id', null);
 
       if (search?.trim()) {
         const keyword = search.trim().toLowerCase();
-        query = query.or(`name.ilike.%${keyword}%,description.ilike.%${keyword}%,class_id.ilike.%${keyword}%`);
+        query = query.or(`name.ilike.%${keyword}%,description.ilike.%${keyword}%`);
       }
 
       if (String(user?.role || '').toUpperCase() === 'GURU') {
-        query = query.eq('teacher_id', user.sub);
+        const { data: assignments, error: assignmentError } = await this.supabase
+          .from('teaching_assignments')
+          .select('subject_id')
+          .eq('teacher_id', user.sub)
+          .is('deleted_at', null);
+        if (assignmentError) throw new InternalServerErrorException(assignmentError.message);
+        const ids = Array.from(new Set((assignments || []).map((item) => item.subject_id)));
+        if (ids.length === 0) return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+        query = query.in('id', ids);
       }
 
       query = query.order(sort, { ascending: order === 'asc' }).range(from, to);
@@ -83,15 +92,23 @@ export class SubjectService {
     try {
       let query = this.supabase
         .from('subjects')
-        .select('*, teacher:teacher_id(name)')
-        .is('deleted_at', null);
+        .select('*, assignments:teaching_assignments!subject_id(id,class_id,teacher_id,deleted_at,teacher:users!teacher_id(id,name,is_active),class:classes!class_id(id,name,grade))')
+        .is('deleted_at', null)
+        .is('canonical_subject_id', null);
 
       if (String(user?.role || '').toUpperCase() === 'GURU') {
-        query = query.eq('teacher_id', user.sub);
+        const { data: assignments, error: assignmentError } = await this.supabase
+          .from('teaching_assignments')
+          .select('subject_id')
+          .eq('teacher_id', user.sub)
+          .is('deleted_at', null);
+        if (assignmentError) throw new InternalServerErrorException(assignmentError.message);
+        const ids = Array.from(new Set((assignments || []).map((item) => item.subject_id)));
+        if (ids.length === 0) return { data: [], meta: { total: 0 } };
+        query = query.in('id', ids);
       }
 
       const { data, error } = await query
-        .order('class_id', { ascending: true })
         .order('name', { ascending: true });
 
       if (error) throw new InternalServerErrorException(error.message);
@@ -109,15 +126,19 @@ export class SubjectService {
     try {
       const { data, error } = await this.supabase
         .from('subjects')
-        .select('*')
+        .select('*, assignments:teaching_assignments!subject_id(id,class_id,teacher_id,deleted_at,teacher:users!teacher_id(id,name,is_active),class:classes!class_id(id,name,grade))')
         .is('deleted_at', null)
+        .is('canonical_subject_id', null)
         .eq('id', id)
         .single();
 
       if (error || !data) throw new NotFoundException(`Subject ${id} not found`);
 
-      if (String(user?.role || '').toUpperCase() === 'GURU' && data.teacher_id !== user.sub) {
-        throw new ForbiddenException('Anda tidak memiliki akses ke mata pelajaran ini.');
+      if (String(user?.role || '').toUpperCase() === 'GURU') {
+        const allowed = (data.assignments || []).some(
+          (assignment: any) => !assignment.deleted_at && assignment.teacher_id === user.sub,
+        );
+        if (!allowed) throw new ForbiddenException('Anda tidak memiliki akses ke mata pelajaran ini.');
       }
 
       return data;
@@ -137,31 +158,28 @@ export class SubjectService {
 
     if (fetchError || !current) throw new NotFoundException(`Subject ${id} not found`);
 
-    const newName = dto.name || current.name;
-    const newClassId = dto.class_id || current.class_id;
+    const newName = String(dto.name || current.name).trim();
 
     // CHECK DUPLICATE if name or class_id changed
-    if (dto.name || dto.class_id) {
+    if (dto.name) {
       const { data: existing, error: checkError } = await this.supabase
         .from('subjects')
         .select('id')
-        .eq('name', newName)
-        .eq('class_id', newClassId)
+        .ilike('name', newName)
         .is('deleted_at', null)
+        .is('canonical_subject_id', null)
         .neq('id', id)
         .maybeSingle();
 
       if (checkError) throw new InternalServerErrorException(checkError.message);
       if (existing) {
-        throw new BadRequestException(`Mata pelajaran ${newName} untuk kelas tersebut sudah ada!`);
+        throw new BadRequestException(`Mata pelajaran ${newName} sudah ada.`);
       }
     }
 
     const updatePayload = {
-      ...(dto.name !== undefined ? { name: dto.name } : {}),
+      ...(dto.name !== undefined ? { name: newName } : {}),
       ...(dto.description !== undefined ? { description: dto.description } : {}),
-      ...(dto.class_id !== undefined ? { class_id: dto.class_id } : {}),
-      ...(dto.teacher_id !== undefined ? { teacher_id: dto.teacher_id } : {}),
       ...(dto.updated_by !== undefined ? { updated_by: dto.updated_by } : {}),
       updated_at: new Date(),
     };
@@ -179,6 +197,13 @@ export class SubjectService {
 
   async softDelete(id: string, deletedBy: string): Promise<Subject> {
     try {
+      const [{ data: assignment }, { data: exam }] = await Promise.all([
+        this.supabase.from('teaching_assignments').select('id').eq('subject_id', id).is('deleted_at', null).limit(1).maybeSingle(),
+        this.supabase.from('exams').select('id').eq('subject_id', id).is('deleted_at', null).limit(1).maybeSingle(),
+      ]);
+      if (assignment || exam) {
+        throw new BadRequestException('Mapel masih dipakai oleh penugasan atau ujian aktif.');
+      }
       const { data, error } = await this.supabase
         .from('subjects')
         .update({ deleted_at: new Date(), deleted_by: deletedBy })
@@ -189,6 +214,7 @@ export class SubjectService {
       if (error || !data) throw new NotFoundException(`Subject ${id} not found`);
       return data;
     } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
       throw new InternalServerErrorException(err.message);
     }
   }

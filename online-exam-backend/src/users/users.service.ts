@@ -6,6 +6,7 @@ import { User } from './entities/user.entity';
 import * as XLSX from 'xlsx';
 
 const publicFields = 'id,name,userid,role,is_active,class_id,class_name,nisn,gender,description,created_at,created_by,updated_at,updated_by,deleted_at,deleted_by';
+const classUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class UsersService {
@@ -20,6 +21,20 @@ export class UsersService {
       .trim()
       .toUpperCase()
       .replace(/[\s_-]+/g, '');
+  }
+
+  private normalizeUserClass(user: Partial<User>) {
+    const classId = String(user.class_id ?? '').trim();
+    const classUuid = classId && classUuidPattern.test(classId) ? classId : null;
+    const className = classUuid
+      ? String(user.class_name ?? '').trim()
+      : classId || String(user.class_name ?? '').trim();
+
+    if (className.length > 20) {
+      throw new BadRequestException('Kode kelas maksimal 20 karakter.');
+    }
+
+    return { class_id: classUuid, class_name: className };
   }
 
   private sortUsers(rows: any[], sort: string, order: 'asc' | 'desc') {
@@ -166,20 +181,37 @@ export class UsersService {
       user.created_by = user.id;
     }
 
+    const normalizedClass = this.normalizeUserClass(user);
+    const duplicateUseridMessage = `User dengan NIK/NIS ${user.userid} sudah terdaftar!`;
+
     // CHECK DUPLICATE NIK/NIS (USERID)
     if (user.userid) {
       const existingUser = await this.getUserByNisNik(user.userid);
       if (existingUser) {
-        throw new BadRequestException(`User dengan NIK/NIS ${user.userid} sudah terdaftar!`);
+        throw new BadRequestException(duplicateUseridMessage);
       }
     }
 
     const { data, error } = await this.supabase
       .from('users')
-      .insert(user)
+      .insert({
+        ...user,
+        ...normalizedClass,
+        nisn: user.nisn ?? '',
+        description: user.description ?? '',
+      })
       .select(publicFields)
       .single();
 
+    if (
+      error?.code === '23505' &&
+      (error.message.includes('"UQ_users_userid"') || error.details?.startsWith('Key (userid)='))
+    ) {
+      throw new BadRequestException(duplicateUseridMessage);
+    }
+    if (error?.code === '22001') {
+      throw new BadRequestException('Ada isian yang terlalu panjang. Periksa NIS/NIK, Nama, NISN, dan Deskripsi.');
+    }
     if (error) throw new InternalServerErrorException(error.message);
     return data;
   }
@@ -286,9 +318,13 @@ export class UsersService {
 
   // UPDATE USER
   async updateUser(id: string, update: Partial<User>) {
+    const normalizedUpdate =
+      update.class_id !== undefined || update.class_name !== undefined
+        ? { ...update, ...this.normalizeUserClass(update) }
+        : update;
     const { data, error } = await this.supabase
       .from('users')
-      .update(update)
+      .update(normalizedUpdate)
       .eq('id', id)
       .select(publicFields)
       .single();
@@ -397,7 +433,8 @@ export class UsersService {
           subjects (
             class_id,
             teacher_id
-          )
+          ),
+          target_classes:exam_target_classes(class_id, class:classes(id,name))
         `,
         )
         .eq('id', examId)
@@ -413,7 +450,13 @@ export class UsersService {
         throw new ForbiddenException('Anda tidak memiliki akses ke ujian ini.');
       }
 
-      if (subject?.class_id) {
+      for (const target of exam?.target_classes || []) {
+        const classRow: any = Array.isArray(target.class) ? target.class[0] : target.class;
+        if (target.class_id) classIdentifiers.add(this.normalizeClassIdentifier(target.class_id));
+        if (classRow?.name) classIdentifiers.add(this.normalizeClassIdentifier(classRow.name));
+      }
+
+      if (classIdentifiers.size === 0 && subject?.class_id) {
         classIdentifiers.add(this.normalizeClassIdentifier(subject.class_id));
 
         const { data: classRow, error: classError } = await this.supabase

@@ -12,6 +12,7 @@ import { QuestionnaireModule } from './questionnaires/questionnaire.module';
 import { getDatabaseConfig } from './config/database.config';
 import { ReportsModule } from './reports/reports.module';
 import { ClassesModule } from './classes/classes.module';
+import { TeachingAssignmentModule } from './teaching-assignments/teaching-assignment.module';
 
 const shouldEnableTypeOrm = process.env.ENABLE_TYPEORM === 'true';
 
@@ -36,6 +37,7 @@ const shouldEnableTypeOrm = process.env.ENABLE_TYPEORM === 'true';
     QuestionnaireModule,
     SubjectModule,
     ClassesModule,
+    TeachingAssignmentModule,
     ReportsModule,
   ],
   controllers: [AppController],

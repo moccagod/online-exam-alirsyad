@@ -14,7 +14,6 @@ import {
   Transition,
   TransitionChild,
 } from "@headlessui/react";
-import SubjectSelect from "../components/DropdownSubject";
 import CustomDatePicker from "../components/CustomDatePicker";
 import ExamTypeSelect from "../components/DropdownExamType";
 import { format } from "date-fns";
@@ -31,6 +30,10 @@ const initialExamForm = {
   duration: 0,
   multiple_choice_weight: 50,
   essay_weight: 50,
+  teacher_id: "",
+  class_ids: [],
+  package_exam_id: "",
+  category_id: "",
 };
 const scoreWeightOptions = [
   { label: "70:30", multipleChoice: 70, essay: 30 },
@@ -49,11 +52,78 @@ const Exam = () => {
   const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const isAdmin = getUserFromToken()?.role === "ADMIN";
   const search = searchParams.get("search") || "";
   const sort = searchParams.get("sort") || "title";
   const order = searchParams.get("order") || "asc";
   const page = Number(searchParams.get("page")) || 1;
   const pageSize = 10;
+  const categoryId = searchParams.get("categoryId") || "";
+
+  const updateParams = (changes) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(changes).forEach(([key, value]) => {
+      if (value === "") next.delete(key);
+      else next.set(key, String(value));
+    });
+    setSearchParams(next);
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const { data } = await api.get("/exam-categories");
+      setCategories(Array.isArray(data) ? data : []);
+    } catch {
+      MySwal.fire("Gagal!", "Gagal mengambil kategori ujian.", "error");
+    }
+  };
+
+  const createCategory = async () => {
+    const result = await MySwal.fire({
+      title: "Tambah kategori ujian",
+      input: "text",
+      inputLabel: "Nama kategori",
+      inputPlaceholder: "Contoh: ATS Ganjil 2026–2027",
+      showCancelButton: true,
+      confirmButtonText: "Simpan",
+      cancelButtonText: "Batal",
+      inputValidator: (value) => !value.trim() ? "Nama kategori wajib diisi." : undefined,
+    });
+    if (!result.isConfirmed) return;
+    try {
+      const { data } = await api.post("/exam-categories", { name: result.value });
+      await fetchCategories();
+      updateParams({ categoryId: data.id, page: "1" });
+      MySwal.fire("Berhasil!", "Kategori ujian ditambahkan.", "success");
+    } catch (error) {
+      MySwal.fire("Gagal!", error.response?.data?.message || "Gagal menambah kategori ujian.", "error");
+    }
+  };
+
+  const renameCategory = async () => {
+    const chosen = categories.find((item) => item.id === categoryId);
+    if (!chosen) return;
+    const result = await MySwal.fire({
+      title: "Ubah nama kategori",
+      input: "text",
+      inputValue: chosen.name,
+      showCancelButton: true,
+      confirmButtonText: "Simpan",
+      cancelButtonText: "Batal",
+      inputValidator: (value) => !value.trim() ? "Nama kategori wajib diisi." : undefined,
+    });
+    if (!result.isConfirmed) return;
+    try {
+      await api.put(`/exam-categories/${chosen.id}`, { name: result.value });
+      await fetchCategories();
+      fetchExams();
+      MySwal.fire("Berhasil!", "Nama kategori diperbarui.", "success");
+    } catch (error) {
+      MySwal.fire("Gagal!", error.response?.data?.message || "Gagal mengubah kategori ujian.", "error");
+    }
+  };
 
   const [formData, setFormData] = useState(initialExamForm);
   const resetForm = () => setFormData(initialExamForm);
@@ -81,9 +151,23 @@ const Exam = () => {
     setLoading(true);
     try {
       const res = await api.get("/exams", {
-        params: { search, sort, order, page, limit: pageSize },
+        params: { search, sort, order, page, limit: pageSize, categoryId },
       });
-      setExams(Array.isArray(res.data?.data) ? res.data.data : []);
+      const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+      if (getUserFromToken()?.role === "ADMIN") {
+        const withTokens = await Promise.all(rows.map(async (exam) => {
+          if (Object.hasOwn(exam, "token")) return exam;
+          try {
+            const { data } = await api.get(`/exams/${exam.id}/control`);
+            return { ...exam, token: data?.token ?? null };
+          } catch {
+            return { ...exam, token: null, tokenLoadError: true };
+          }
+        }));
+        setExams(withTokens);
+      } else {
+        setExams(rows);
+      }
       setMeta(res.data?.meta || { total: 0 });
     } catch {
       MySwal.fire({
@@ -98,18 +182,43 @@ const Exam = () => {
 
   useEffect(() => {
     fetchExams();
-  }, [search, sort, order, page]);
+  }, [search, sort, order, page, categoryId]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  useEffect(() => {
+    api.get("/teaching-assignments")
+      .then((response) => setAssignments(response.data?.data || []))
+      .catch(() => setAssignments([]));
+  }, []);
+
+  const teacherId = getUserFromToken()?.role === "GURU" ? getUserFromToken()?.sub : formData.teacher_id;
+  const teacherOptions = Array.from(new Map(assignments.map((item) => {
+    const teacher = Array.isArray(item.teacher) ? item.teacher[0] : item.teacher;
+    return [item.teacher_id, teacher];
+  })).entries()).filter(([, teacher]) => teacher);
+  const subjectOptions = Array.from(new Map(assignments
+    .filter((item) => !teacherId || item.teacher_id === teacherId)
+    .map((item) => {
+      const subject = Array.isArray(item.subject) ? item.subject[0] : item.subject;
+      return [item.subject_id, subject];
+    })).entries()).filter(([, subject]) => subject);
+  const classOptions = assignments
+    .filter((item) => item.teacher_id === teacherId && item.subject_id === formData.subject_id)
+    .map((item) => ({ id: item.class_id, ...(Array.isArray(item.class) ? item.class[0] : item.class) }));
 
   const handleSubmit = async () => {
     if (saving) return;
-    if (!formData.title || !formData.subject_id || !formData.type || !formData.date || !formData.duration) {
-      MySwal.fire("Gagal!", "Silakan lengkapi semua isian wajib (Judul, Mata Pelajaran, Jenis, Tanggal, dan Durasi)!", "error");
+    if (!formData.title || !formData.subject_id || !formData.type || !formData.date || !formData.duration || !teacherId || formData.class_ids.length === 0 || !formData.category_id) {
+      MySwal.fire("Gagal!", "Lengkapi kategori, judul, guru, mapel, kelas, jenis, tanggal, dan durasi.", "error");
       return;
     }
 
     try {
       setSaving(true);
-      await api.post("/exams", formData, {
+      await api.post("/exams", { ...formData, teacher_id: teacherId, package_exam_id: formData.package_exam_id || undefined }, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
       setShowModal(false);
@@ -149,6 +258,10 @@ const Exam = () => {
           duration: exam.duration,
           multiple_choice_weight: Number(exam.multiple_choice_weight ?? 50),
           essay_weight: Number(exam.essay_weight ?? 50),
+          teacher_id: exam.assigned_teacher_id || "",
+          class_ids: (exam.target_classes || []).map((target) => target.class_id),
+          package_exam_id: exam.package_exam_id || "",
+          category_id: exam.category_id || "",
         });
         setSelectedId(exam.id);
         setEditModalOpen(true);
@@ -173,7 +286,7 @@ const Exam = () => {
       setUpdating(true);
       await api.put(
         `/exams/${selectedId}`,
-        formData,
+        { ...formData, category_id: formData.category_id || undefined },
         { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
       );
       setEditModalOpen(false);
@@ -235,20 +348,32 @@ const Exam = () => {
             </div>
             <h3 className="module-title">Daftar Ujian</h3>
           </div>
-          {getUserFromToken()?.role === "ADMIN" && <button
+          <button
             onClick={() => {
-              resetForm();
+              setFormData({ ...initialExamForm, category_id: categories.some((item) => item.id === categoryId) ? categoryId : "", teacher_id: getUserFromToken()?.role === "GURU" ? getUserFromToken()?.sub || "" : "" });
               setShowModal(true);
             }}
             className="module-action-btn bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white transition-all"
           >
             + Tambah Ujian
-          </button>}
+          </button>
         </div>
 
         {/* Table Section */}
         <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-          <SearchBar value={search} />
+          <div className="flex flex-wrap items-start gap-3">
+            <SearchBar value={search} />
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="exam-category-filter" className="text-sm font-medium text-slate-600">Kategori</label>
+              <select id="exam-category-filter" value={categoryId} onChange={(event) => updateParams({ categoryId: event.target.value, page: "1" })} className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
+                <option value="">Semua kategori</option>
+                <option value="uncategorized">Belum dikategorikan</option>
+                {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              {isAdmin && <button type="button" onClick={createCategory} className="min-h-10 rounded-lg border border-emerald-200 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50">+ Kategori</button>}
+              {isAdmin && categories.some((item) => item.id === categoryId) && <button type="button" onClick={renameCategory} className="min-h-10 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50">Ubah nama</button>}
+            </div>
+          </div>
 
           {loading ? (
             <div className="mt-6 animate-pulse space-y-3">
@@ -285,12 +410,7 @@ const Exam = () => {
                   total={meta.total}
                   pageSize={pageSize}
                   onPageChange={(p) =>
-                    setSearchParams({
-                      search,
-                      sort,
-                      order,
-                      page: p.toString(),
-                    })
+                    updateParams({ page: p.toString() })
                   }
                 />
               </div>
@@ -332,7 +452,7 @@ const Exam = () => {
                   leaveFrom="opacity-100 scale-100"
                   leaveTo="opacity-0 scale-95"
                 >
-                  <DialogPanel className="w-full max-w-md transform rounded-2xl bg-white p-6 text-left align-middle shadow-2xl border border-gray-200 transition-all">
+                  <DialogPanel className="w-full max-w-2xl transform rounded-2xl bg-white p-6 text-left align-middle shadow-2xl border border-gray-200 transition-all">
                     <DialogTitle
                       as="h3"
                       className="text-xl font-semibold text-gray-800 mb-4"
@@ -341,6 +461,14 @@ const Exam = () => {
                     </DialogTitle>
 
                     <div className="space-y-4">
+                      <div>
+                        <label htmlFor="exam-category-field" className="block text-sm font-medium text-gray-700">Kategori Ujian</label>
+                        <select id="exam-category-field" value={formData.category_id} onChange={(event) => setFormData((prev) => ({ ...prev, category_id: event.target.value }))} className="min-h-11 w-full rounded-lg border border-gray-300 px-3">
+                          <option value="">{showModal ? "Pilih kategori" : "Belum dikategorikan (ujian lama)"}</option>
+                          {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                        {showModal && categories.length === 0 && <p className="mt-1 text-xs text-amber-700">{isAdmin ? "Buat kategori terlebih dahulu." : "Minta admin membuat kategori ujian terlebih dahulu."}</p>}
+                      </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700">
                           Judul Ujian
@@ -407,22 +535,40 @@ const Exam = () => {
                         </p>
                       </div>
 
+                      {showModal && getUserFromToken()?.role === "ADMIN" && <div>
+                        <label className="block text-sm font-medium text-gray-700">Guru pengampu</label>
+                        <select value={formData.teacher_id} onChange={(event) => setFormData((prev) => ({ ...prev, teacher_id: event.target.value, subject_id: "", class_ids: [], package_exam_id: "" }))} className="min-h-11 w-full rounded-lg border border-gray-300 px-3">
+                          <option value="">Pilih guru</option>
+                          {teacherOptions.map(([id, teacher]) => <option key={id} value={id}>{teacher.name}</option>)}
+                        </select>
+                      </div>}
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700">
                           Mata Pelajaran
                         </label>
-                        <div className="border border-gray-300 rounded-lg">
-                          <SubjectSelect
-                            subject={formData.subject_id}
-                            setSubject={(value) =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                subject_id: value,
-                              }))
-                            }
-                          />
-                        </div>
+                        <select value={formData.subject_id} disabled={!showModal || !teacherId} onChange={(event) => setFormData((prev) => ({ ...prev, subject_id: event.target.value, class_ids: [], package_exam_id: "" }))} className="min-h-11 w-full rounded-lg border border-gray-300 px-3 disabled:bg-slate-100">
+                          <option value="">Pilih mapel dari penugasan</option>
+                          {subjectOptions.map(([id, subject]) => <option key={id} value={id}>{subject.name}</option>)}
+                        </select>
                       </div>
+
+                      {showModal && <fieldset>
+                        <legend className="block text-sm font-medium text-gray-700">Kelas peserta</legend>
+                        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {classOptions.map((classRow) => <label key={classRow.id} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm ${formData.class_ids.includes(classRow.id) ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}><input type="checkbox" checked={formData.class_ids.includes(classRow.id)} onChange={() => setFormData((prev) => ({ ...prev, class_ids: prev.class_ids.includes(classRow.id) ? prev.class_ids.filter((id) => id !== classRow.id) : [...prev.class_ids, classRow.id] }))} className="accent-emerald-600" />{classRow.name || classRow.id}</label>)}
+                        </div>
+                        {formData.subject_id && classOptions.length === 0 && <p className="mt-2 text-sm text-amber-700">Belum ada kelas pada penugasan ini.</p>}
+                      </fieldset>}
+
+                      {showModal && <div>
+                        <label className="block text-sm font-medium text-gray-700">Gunakan paket soal (opsional)</label>
+                        <select value={formData.package_exam_id} onChange={(event) => setFormData((prev) => ({ ...prev, package_exam_id: event.target.value }))} className="min-h-11 w-full rounded-lg border border-gray-300 px-3">
+                          <option value="">Buat paket soal baru</option>
+                          {exams.filter((exam) => exam.subject_id === formData.subject_id && exam.assigned_teacher_id === teacherId).map((exam) => <option key={exam.id} value={exam.id}>{exam.title}</option>)}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">Pilih ujian lama bila sesi ini memakai soal yang sama.</p>
+                      </div>}
                     </div>
 
                     <div className="mt-6 flex justify-end space-x-3">

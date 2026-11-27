@@ -184,7 +184,8 @@ export class TeacherExamsService {
             duration,
             subject_id,
             deleted_at,
-            subjects(id, name, class_id, teacher_id)
+            subjects(id, name, class_id, teacher_id),
+            target_classes:exam_target_classes(class_id,class:classes(id,name))
           )
         `);
 
@@ -199,7 +200,12 @@ export class TeacherExamsService {
         const exam = this.normalizeRelation(submission.exams);
         if (!exam || exam.deleted_at) return acc;
 
-        const subject = this.normalizeRelation(exam.subjects);
+        const rawSubject = this.normalizeRelation(exam.subjects);
+        const targetNames = (exam.target_classes || []).map((target: any) => {
+          const classRow = this.normalizeRelation(target.class);
+          return classRow?.name || target.class_id;
+        }).filter(Boolean);
+        const subject = rawSubject ? { ...rawSubject, class_id: targetNames.join(', ') || rawSubject.class_id } : rawSubject;
         if (!acc[exam.id]) {
           acc[exam.id] = {
             ...exam,

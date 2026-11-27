@@ -1,488 +1,172 @@
-import { useState, useEffect, Fragment } from "react";
-import { useSearchParams } from "react-router-dom";
-import { FaBookOpen } from "react-icons/fa";
-import Sidebar from "../components/Sidebar";
-import SearchBar from "../components/Users/SearchBar";
-import SubjectTable from "../components/Subjects/SubjectTable";
-import Pagination from "../components/Paginate";
+import { useEffect, useMemo, useState } from "react";
+import { FaBookOpen, FaChalkboardTeacher, FaLayerGroup, FaPlus, FaTrash } from "react-icons/fa";
 import Swal from "sweetalert2";
-import withReactContent from "sweetalert2-react-content";
-import {
-  Dialog,
-  DialogPanel,
-  DialogTitle,
-  Transition,
-  TransitionChild,
-} from "@headlessui/react";
-import ClassSelect from "../components/DropdownClass";
-import TeacherSelect from "../components/DropdownTeacher";
-import api from "../api/axiosConfig";
+import Sidebar from "../components/Sidebar";
 import LoadingButton from "../components/LoadingButton";
+import api from "../api/axiosConfig";
+import { getUserFromToken } from "../utils/jwtHelper";
 
-const MySwal = withReactContent(Swal);
-const initialSubjectForm = {
-  id: "",
-  name: "",
-  description: "",
-  class_id: "",
-  teacher_id: "",
-};
+const emptySubject = { name: "", description: "" };
+const emptyAssignment = { subject_id: "", teacher_id: "", class_ids: [] };
+const relation = (value) => (Array.isArray(value) ? value[0] : value);
 
-const Subjects = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [data, setData] = useState([]);
+export default function Subjects() {
+  const isAdmin = getUserFromToken()?.role === "ADMIN";
+  const [tab, setTab] = useState(isAdmin ? "subjects" : "mine");
+  const [subjects, setSubjects] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [teachers, setTeachers] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [subjectForm, setSubjectForm] = useState(emptySubject);
+  const [assignmentForm, setAssignmentForm] = useState(emptyAssignment);
+  const [editingSubject, setEditingSubject] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
-  const [meta, setMeta] = useState({ total: 0 });
   const [saving, setSaving] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-  const search = searchParams.get("search") || "";
-  const sort = searchParams.get("sort") || "name";
-  const order = searchParams.get("order") || "asc";
-  const page = Number(searchParams.get("page")) || 1;
-  const pageSize = 10;
 
-  const [formData, setFormData] = useState(initialSubjectForm);
-  const resetForm = () => setFormData(initialSubjectForm);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const fetchData = async () => {
+  const load = async () => {
     setLoading(true);
     try {
-      const res = await api.get("/subjects", {
-        params: { search, sort, order, page, limit: pageSize },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
-
-      setData(res.data?.data || []);
-      setMeta(res.data?.meta || { total: 0 });
-    } catch (err) {
-      console.error("Failed to fetch subjects:", err);
-      MySwal.fire("Error", "Gagal mengambil data mata pelajaran.", "error");
-      setData([]);
-      setMeta({ total: 0 });
+      const requests = [api.get("/subjects/all"), api.get("/teaching-assignments")];
+      if (isAdmin) {
+        requests.push(api.get("/classes/all"));
+        requests.push(api.get("/users/role", { params: { role: "GURU", page: 1, limit: 1000 } }));
+      }
+      const [subjectRes, assignmentRes, classRes, teacherRes] = await Promise.all(requests);
+      setSubjects(subjectRes.data?.data || []);
+      setAssignments(assignmentRes.data?.data || []);
+      setClasses(classRes?.data?.data || []);
+      setTeachers(teacherRes?.data?.data || []);
+    } catch (error) {
+      Swal.fire("Gagal memuat data", error.userMessage || "Data akademik tidak dapat dimuat.", "error");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [search, sort, order, page]);
+  useEffect(() => { load(); }, []);
 
-  const handleSubmit = async () => {
-    if (saving) return;
-    if (!formData.name || !formData.class_id || !formData.teacher_id) {
-      MySwal.fire("Gagal!", "Silakan isi Nama, Kelas, dan Guru Pengampu!", "error");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await api.post("/subjects", formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
-
-      setShowModal(false);
-      resetForm();
-      MySwal.fire("Berhasil!", "Mata Pelajaran berhasil ditambahkan.", "success");
-      fetchData();
-    } catch (err) {
-      const msg = err.response?.data?.message || "Gagal menambah Mata Pelajaran.";
-      MySwal.fire("Gagal!", msg, "error");
-      console.error("Failed to add subject:", err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEdit = async (id) => {
-    try {
-      const res = await api.get(`/subjects/${id}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
-      const data = res.data;
-      setFormData({
-        id: data.id,
-        name: data.name,
-        description: data.description,
-        class_id: data.class_id,
-        teacher_id: data.teacher_id,
-      });
-      setSelectedId(data.id);
-      setEditModalOpen(true);
-    } catch (err) {
-      MySwal.fire("Error", "Gagal mengambil data Mata Pelajaran.", "error");
-      console.error("Failed to fetch subject for edit:", err);
-    }
-  };
-
-  const handleUpdate = async () => {
-    if (updating) return;
-    if (!formData.name || !formData.class_id || !formData.teacher_id) {
-      MySwal.fire("Gagal!", "Silakan isi Nama, Kelas, dan Guru Pengampu!", "error");
-      return;
-    }
-
-    try {
-      setUpdating(true);
-      await api.put(
-        `/subjects/${selectedId}`,
-        { ...formData },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-      setEditModalOpen(false);
-      resetForm();
-      MySwal.fire("Berhasil!", "Mata Pelajaran berhasil diperbarui.", "success");
-      fetchData();
-    } catch (err) {
-      const msg = err.response?.data?.message || "Gagal memperbarui Mata Pelajaran.";
-      MySwal.fire("Gagal!", msg, "error");
-      console.error("Failed to update subject:", err);
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (deletingId) return;
-    const result = await MySwal.fire({
-      title: "Hapus mata pelajaran?",
-      text: "Data akan disembunyikan dari daftar aktif.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Hapus",
-      cancelButtonText: "Batal",
+  const grouped = useMemo(() => {
+    const groups = new Map();
+    assignments.forEach((assignment) => {
+      const subject = relation(assignment.subject);
+      const classRow = relation(assignment.class);
+      const teacher = relation(assignment.teacher);
+      if (!subject) return;
+      const key = `${subject.id}:${teacher?.id || assignment.teacher_id}`;
+      if (!groups.has(key)) groups.set(key, { subject, teacher, assignments: [] });
+      groups.get(key).assignments.push({ ...assignment, class: classRow });
     });
+    return Array.from(groups.values()).sort((a, b) => a.subject.name.localeCompare(b.subject.name, "id"));
+  }, [assignments]);
 
-    if (!result.isConfirmed) return;
-
+  const saveSubject = async () => {
+    const name = subjectForm.name.trim();
+    if (!name) return Swal.fire("Nama mapel wajib diisi", "", "warning");
+    setSaving(true);
     try {
-      setDeletingId(id);
-      await api.delete(`/subjects/${id}`);
-      MySwal.fire("Berhasil!", "Mata pelajaran berhasil dihapus.", "success");
-      fetchData();
-    } catch (err) {
-      const msg = err.response?.data?.message || "Gagal menghapus mata pelajaran.";
-      MySwal.fire("Gagal!", msg, "error");
-    } finally {
-      setDeletingId(null);
-    }
+      if (editingSubject) await api.put(`/subjects/${editingSubject}`, { ...subjectForm, name });
+      else await api.post("/subjects", { ...subjectForm, name });
+      setSubjectForm(emptySubject);
+      setEditingSubject(null);
+      await load();
+    } catch (error) {
+      Swal.fire("Mapel belum tersimpan", error.userMessage || "Periksa kembali isian.", "error");
+    } finally { setSaving(false); }
   };
+
+  const saveAssignment = async () => {
+    if (!assignmentForm.subject_id || !assignmentForm.teacher_id || assignmentForm.class_ids.length === 0) {
+      return Swal.fire("Lengkapi penugasan", "Pilih mapel, guru, dan minimal satu kelas.", "warning");
+    }
+    setSaving(true);
+    try {
+      await api.post("/teaching-assignments", assignmentForm);
+      setAssignmentForm(emptyAssignment);
+      await load();
+      Swal.fire({ icon: "success", title: "Penugasan tersimpan", timer: 1300, showConfirmButton: false });
+    } catch (error) {
+      Swal.fire("Penugasan belum tersimpan", error.userMessage || "Periksa kembali pilihan.", "error");
+    } finally { setSaving(false); }
+  };
+
+  const removeAssignment = async (id) => {
+    const answer = await Swal.fire({ title: "Hapus penugasan?", text: "Ujian dan nilai lama tidak ikut terhapus.", icon: "warning", showCancelButton: true, confirmButtonText: "Hapus", cancelButtonText: "Batal" });
+    if (!answer.isConfirmed) return;
+    try { await api.delete(`/teaching-assignments/${id}`); await load(); }
+    catch (error) { Swal.fire("Gagal", error.userMessage || "Penugasan tidak dapat dihapus.", "error"); }
+  };
+
+  const toggleClass = (classId) => setAssignmentForm((current) => ({
+    ...current,
+    class_ids: current.class_ids.includes(classId) ? current.class_ids.filter((id) => id !== classId) : [...current.class_ids, classId],
+  }));
 
   return (
     <Sidebar>
-      <div className="module-shell font-poppins">
-        {/* Header */}
-        <div className="module-header">
+      <main className="module-shell font-poppins">
+        <header className="module-header">
           <div className="module-title-wrap">
-            <div className="module-icon">
-              <FaBookOpen className="text-lg" />
+            <div className="module-icon"><FaBookOpen /></div>
+            <div>
+              <h1 className="module-title">{isAdmin ? "Data Akademik" : "Mapel Saya"}</h1>
+              <p className="mt-1 text-sm text-slate-500">{isAdmin ? "Pisahkan master mapel dari guru dan kelas pengampu." : "Mapel dan kelas yang ditugaskan kepada akun Anda."}</p>
             </div>
-            <h3 className="module-title">
-              Daftar Mata Pelajaran
-            </h3>
           </div>
-          <button
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="module-action-btn bg-emerald-600 hover:bg-emerald-700 text-white transition-colors duration-200"
-          >
-            + Tambah Mata Pelajaran
-          </button>
-        </div>
+        </header>
 
-        {/* Table Section */}
-        <div className="mt-6 bg-white rounded-2xl shadow-md border border-gray-100 p-4 overflow-x-auto">
-          <SearchBar value={search} />
+        {isAdmin && (
+          <nav className="mt-6 flex gap-2 border-b border-slate-200" aria-label="Bagian data akademik">
+            {[["subjects", "Master Mapel", FaLayerGroup], ["assignments", "Penugasan Mengajar", FaChalkboardTeacher]].map(([value, label, Icon]) => (
+              <button key={value} type="button" onClick={() => setTab(value)} className={`flex min-h-11 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors ${tab === value ? "border-emerald-600 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}><Icon /> {label}</button>
+            ))}
+          </nav>
+        )}
 
-          {loading ? (
-            <div className="mt-6 animate-pulse space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-6 bg-gray-200 rounded"></div>
-              ))}
-            </div>
-          ) : data.length === 0 ? (
-            <div className="text-center text-gray-600 py-10">
-              Tidak ada data mata pelajaran yang ditemukan.
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <SubjectTable
-                  data={data}
-                  onRefresh={fetchData}
-                  searchParams={searchParams}
-                  setSearchParams={setSearchParams}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                />
-              </div>
-
-              {/* Pagination Info */}
-              <div className="flex flex-col sm:flex-row items-center justify-between mt-6 gap-3 text-sm text-gray-600">
-                {meta.total > 0 && (
-                  <span>
-                    Menampilkan{" "}
-                    <strong>{(page - 1) * pageSize + 1}</strong> hingga{" "}
-                    <strong>{Math.min(page * pageSize, meta.total)}</strong> dari{" "}
-                    <strong>{meta.total}</strong> entri
-                  </span>
-                )}
-                <Pagination
-                  current={page}
-                  total={meta.total}
-                  pageSize={pageSize}
-                  onPageChange={(p) =>
-                    setSearchParams({ search, sort, order, page: p.toString() })
-                  }
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Modal Tambah */}
-        <Transition appear show={showModal} as={Fragment}>
-          <Dialog as="div" className="relative z-10" onClose={() => { setShowModal(false); resetForm(); }}>
-            <TransitionChild
-              as={Fragment}
-              enter="ease-out duration-300"
-              enterFrom="opacity-0"
-              enterTo="opacity-100"
-              leave="ease-in duration-200"
-              leaveFrom="opacity-100"
-              leaveTo="opacity-0"
-            >
-              <div className="fixed inset-0 bg-[rgba(0,0,0,0.3)] backdrop-blur-sm" />
-            </TransitionChild>
-
-            <div className="fixed inset-0 overflow-y-auto">
-              <div className="flex min-h-full items-center justify-center p-4 text-center">
-                <TransitionChild
-                  as={Fragment}
-                  enter="ease-out duration-300"
-                  enterFrom="opacity-0 scale-95"
-                  enterTo="opacity-100 scale-100"
-                  leave="ease-in duration-200"
-                  leaveFrom="opacity-100 scale-100"
-                  leaveTo="opacity-0 scale-95"
-                >
-                  <DialogPanel className="w-full max-w-md transform overflow-visible rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-                    <DialogTitle className="text-lg font-semibold text-gray-800">
-                      Tambah Mata Pelajaran
-                    </DialogTitle>
-                    <div className="mt-4 space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Nama
-                        </label>
-                        <input
-                          type="text"
-                          name="name"
-                          value={formData.name}
-                          onChange={handleInputChange}
-                          className="mt-1 w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Kelas
-                        </label>
-                        <div className="border border-gray-300 rounded-lg">
-                          <ClassSelect
-                            classes={formData.class_id}
-                            setClasses={(value) =>
-                              setFormData((prev) => ({ ...prev, class_id: value }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Guru Pengampu
-                        </label>
-                        <div className="border border-gray-300 rounded-lg">
-                          <TeacherSelect
-                            teacherId={formData.teacher_id}
-                            setTeacherId={(value) =>
-                              setFormData((prev) => ({ ...prev, teacher_id: value }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Deskripsi
-                        </label>
-                        <textarea
-                          name="description"
-                          value={formData.description}
-                          onChange={handleInputChange}
-                          rows={3}
-                          className="mt-1 w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-6 flex justify-end space-x-2">
-                      <button
-                        onClick={() => { setShowModal(false); resetForm(); }}
-                        disabled={saving}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                      >
-                        Batal
-                      </button>
-                      <LoadingButton
-                        onClick={handleSubmit}
-                        loading={saving}
-                        loadingText="Menyimpan..."
-                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                      >
-                        Simpan
-                      </LoadingButton>
-                    </div>
-                  </DialogPanel>
-                </TransitionChild>
+        {loading ? (
+          <div className="mt-6 grid gap-4 md:grid-cols-3">{[1, 2, 3].map((item) => <div key={item} className="h-36 animate-pulse rounded-2xl bg-slate-200" />)}</div>
+        ) : tab === "subjects" && isAdmin ? (
+          <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 px-5 py-4"><h2 className="font-semibold text-slate-900">Master mata pelajaran</h2><p className="mt-1 text-sm text-slate-500">Satu nama mapel cukup dibuat sekali.</p></div>
+              <div className="divide-y divide-slate-100">
+                {subjects.map((subject) => (
+                  <div key={subject.id} className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50">
+                    <div className="min-w-0"><p className="font-medium text-slate-900">{subject.name}</p><p className="truncate text-sm text-slate-500">{subject.description || "Tanpa deskripsi"}</p></div>
+                    <button type="button" onClick={() => { setEditingSubject(subject.id); setSubjectForm({ name: subject.name, description: subject.description || "" }); }} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">Ubah</button>
+                  </div>
+                ))}
               </div>
             </div>
-          </Dialog>
-        </Transition>
-
-        {/* Modal Edit */}
-        <Transition appear show={editModalOpen} as={Fragment}>
-          <Dialog as="div" className="relative z-10" onClose={() => { setEditModalOpen(false); resetForm(); }}>
-            <TransitionChild
-              as={Fragment}
-              enter="ease-out duration-300"
-              enterFrom="opacity-0"
-              enterTo="opacity-100"
-              leave="ease-in duration-200"
-              leaveFrom="opacity-100"
-              leaveTo="opacity-0"
-            >
-              <div className="fixed inset-0 bg-[rgba(0,0,0,0.3)] backdrop-blur-sm" />
-            </TransitionChild>
-
-            <div className="fixed inset-0 overflow-y-auto">
-              <div className="flex min-h-full items-center justify-center p-4 text-center">
-                <TransitionChild
-                  as={Fragment}
-                  enter="ease-out duration-300"
-                  enterFrom="opacity-0 scale-95"
-                  enterTo="opacity-100 scale-100"
-                  leave="ease-in duration-200"
-                  leaveFrom="opacity-100 scale-100"
-                  leaveTo="opacity-0 scale-95"
-                >
-                  <DialogPanel className="w-full max-w-md transform overflow-visible rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-                    <DialogTitle className="text-lg font-semibold text-gray-800">
-                      Edit Mata Pelajaran
-                    </DialogTitle>
-                    <div className="mt-4 space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Nama
-                        </label>
-                        <input
-                          type="text"
-                          name="name"
-                          value={formData.name}
-                          onChange={handleInputChange}
-                          className="mt-1 w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Kelas
-                        </label>
-                        <div className="border border-gray-300 rounded-lg">
-                          <ClassSelect
-                            classes={formData.class_id}
-                            setClasses={(value) =>
-                              setFormData((prev) => ({ ...prev, class_id: value }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Guru Pengampu
-                        </label>
-                        <div className="border border-gray-300 rounded-lg">
-                          <TeacherSelect
-                            teacherId={formData.teacher_id}
-                            setTeacherId={(value) =>
-                              setFormData((prev) => ({ ...prev, teacher_id: value }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          Deskripsi
-                        </label>
-                        <textarea
-                          name="description"
-                          value={formData.description}
-                          onChange={handleInputChange}
-                          rows={3}
-                          className="mt-1 w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-6 flex justify-end space-x-2">
-                      <button
-                        onClick={() => { setEditModalOpen(false); resetForm(); }}
-                        disabled={updating}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                      >
-                        Batal
-                      </button>
-                      <LoadingButton
-                        onClick={handleUpdate}
-                        loading={updating}
-                        loadingText="Memperbarui..."
-                        className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
-                      >
-                        Update
-                      </LoadingButton>
-                    </div>
-                  </DialogPanel>
-                </TransitionChild>
-              </div>
-            </div>
-          </Dialog>
-        </Transition>
-      </div>
+            <aside className="h-fit rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700"><FaPlus /></span><div><h2 className="font-semibold text-slate-900">{editingSubject ? "Ubah mapel" : "Tambah mapel"}</h2><p className="text-xs text-slate-500">Guru dan kelas dipilih pada penugasan.</p></div></div>
+              <label className="mt-5 block text-sm font-medium text-slate-700">Nama mapel<input value={subjectForm.name} onChange={(event) => setSubjectForm((form) => ({ ...form, name: event.target.value }))} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
+              <label className="mt-4 block text-sm font-medium text-slate-700">Deskripsi<textarea value={subjectForm.description} onChange={(event) => setSubjectForm((form) => ({ ...form, description: event.target.value }))} rows="3" className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" /></label>
+              <div className="mt-5 flex gap-2"><LoadingButton loading={saving} onClick={saveSubject} className="min-h-11 flex-1 rounded-lg bg-emerald-600 px-4 font-semibold text-white hover:bg-emerald-700">Simpan mapel</LoadingButton>{editingSubject && <button type="button" onClick={() => { setEditingSubject(null); setSubjectForm(emptySubject); }} className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700">Batal</button>}</div>
+            </aside>
+          </section>
+        ) : tab === "assignments" && isAdmin ? (
+          <section className="mt-6 grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+            <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="font-semibold text-slate-900">Buat penugasan</h2><p className="mt-1 text-sm text-slate-500">Satu guru dapat menerima beberapa kelas sekaligus.</p>
+              <label className="mt-5 block text-sm font-medium text-slate-700">Mata pelajaran<select value={assignmentForm.subject_id} onChange={(event) => setAssignmentForm((form) => ({ ...form, subject_id: event.target.value }))} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value="">Pilih mapel</option>{subjects.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+              <label className="mt-4 block text-sm font-medium text-slate-700">Guru pengampu<select value={assignmentForm.teacher_id} onChange={(event) => setAssignmentForm((form) => ({ ...form, teacher_id: event.target.value }))} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3"><option value="">Pilih guru</option>{teachers.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.userid}</option>)}</select></label>
+              <fieldset className="mt-4"><legend className="text-sm font-medium text-slate-700">Kelas yang diajar</legend><div className="mt-2 grid grid-cols-2 gap-2">{classes.map((row) => <label key={row.id} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm ${assignmentForm.class_ids.includes(row.id) ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}><input type="checkbox" checked={assignmentForm.class_ids.includes(row.id)} onChange={() => toggleClass(row.id)} className="accent-emerald-600" /> {row.name}</label>)}</div></fieldset>
+              <LoadingButton loading={saving} onClick={saveAssignment} className="mt-5 min-h-11 w-full rounded-lg bg-emerald-600 px-4 font-semibold text-white hover:bg-emerald-700">Simpan penugasan</LoadingButton>
+            </aside>
+            <div className="space-y-4">{grouped.map((group) => (
+              <article key={`${group.subject.id}:${group.teacher?.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 transition-transform hover:-translate-y-0.5">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">{group.teacher?.name || "Guru"}</p><h2 className="mt-1 text-lg font-semibold text-slate-900">{group.subject.name}</h2></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{group.assignments.length} kelas</span></div>
+                <div className="mt-4 flex flex-wrap gap-2">{group.assignments.map((assignment) => <span key={assignment.id} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-800">{assignment.class?.name || assignment.class_id}<button type="button" aria-label={`Hapus kelas ${assignment.class?.name || assignment.class_id}`} onClick={() => removeAssignment(assignment.id)} className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-red-100 hover:text-red-700"><FaTrash className="text-xs" /></button></span>)}</div>
+              </article>
+            ))}</div>
+          </section>
+        ) : (
+          <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {grouped.map((group) => <article key={`${group.subject.id}:${group.teacher?.id}`} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-transform hover:-translate-y-0.5"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700"><FaBookOpen /></span><h2 className="mt-4 text-lg font-semibold text-slate-900">{group.subject.name}</h2><p className="mt-1 text-sm text-slate-500">{group.subject.description || "Mata pelajaran aktif"}</p><div className="mt-5 flex flex-wrap gap-2">{group.assignments.map((assignment) => <span key={assignment.id} className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">{assignment.class?.name || assignment.class_id}</span>)}</div></article>)}
+            {grouped.length === 0 && <p className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">Belum ada penugasan mengajar untuk akun ini.</p>}
+          </section>
+        )}
+      </main>
     </Sidebar>
   );
-};
-
-export default Subjects;
+}

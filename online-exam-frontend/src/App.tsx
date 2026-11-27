@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, useEffect } from "react";
 import ProtectedRoute from "./routes/ProtectedRoutes";
-import { startVideoUploadQueue } from "./utils/backgroundVideoUpload";
 
 // Importing the pages
 import Login from "./pages/Login.jsx";
@@ -24,7 +23,8 @@ import Classes from "./pages/Classes.jsx";
 
 function App() {
   useEffect(() => {
-    startVideoUploadQueue();
+    // Remove recordings left in the upload queue by older application versions.
+    if (typeof indexedDB !== "undefined") indexedDB.deleteDatabase("exam-video-upload-queue");
   }, []);
 
   return (

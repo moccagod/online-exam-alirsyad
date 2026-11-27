@@ -68,12 +68,10 @@ const Login = () => {
         </div>
         
         <div className="relative z-10 max-w-xl text-white">
-          <div className="h-16 w-16 bg-gradient-to-tr from-emerald-400 to-teal-500 rounded-2xl flex items-center justify-center shadow-2xl mb-8">
-            <span className="text-3xl font-black">A</span>
-          </div>
+          <img src="/img/logo.png" alt="Logo SMK Al Irsyad" className="w-28 h-20 object-contain mb-8" />
           <h1 className="text-5xl font-black tracking-tight leading-tight mb-6">
             SMK AL IRSYAD <br />
-            <span className="text-emerald-400">Computer Based Test</span>
+            <span className="text-emerald-400">CBT</span>
           </h1>
           <p className="text-xl text-slate-300 leading-relaxed font-medium">
             Platform asesmen modern untuk mendukung kemajuan akademik siswa secara transparan dan efisien.
@@ -101,8 +99,8 @@ const Login = () => {
       <div className="w-full lg:w-2/5 flex flex-col justify-center items-center p-8 sm:p-12 md:p-16 bg-white relative">
         <div className="w-full max-w-md">
           <div className="lg:hidden mb-8 flex items-center gap-3">
-             <div className="h-10 w-10 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg text-white font-black">A</div>
-             <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Al Irsyad</h2>
+             <img src="/img/logo.png" alt="Logo SMK Al Irsyad" className="h-12 w-12 shrink-0 object-contain" />
+             <h2 className="text-lg font-black text-slate-900 tracking-tight">SMK AL IRSYAD CBT</h2>
           </div>
 
           <div className="mb-10">
@@ -192,7 +190,7 @@ const Login = () => {
 
         <div className="absolute bottom-8 text-center w-full">
            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-             © {new Date().getFullYear()} Al Irsyad Exam System — Versi 2.0
+             © {new Date().getFullYear()} SMK AL IRSYAD CBT — Versi 2.0
            </p>
         </div>
       </div>

@@ -137,8 +137,13 @@ export class UsersController {
     const defaultPassword =
       this.normalizeDefaultPassword(process.env.DEFAULT_NEW_USER_PASSWORD) || '123456';
 
-    if (!body.name || !body.userid || !body.role) {
-      throw new BadRequestException('Missing required fields');
+    const name = String(body.name ?? '').trim();
+    const userid = String(body.userid ?? '').trim();
+    if (!name || !userid || !body.role) {
+      throw new BadRequestException('NIS/NIK, Nama, dan Role wajib diisi.');
+    }
+    if (body.gender !== 'L' && body.gender !== 'P') {
+      throw new BadRequestException('Silakan pilih jenis kelamin.');
     }
 
     const requestedPassword = this.normalizeDefaultPassword(body.password);
@@ -147,6 +152,8 @@ export class UsersController {
 
     return this.usersService.createUser({
       ...body,
+      name,
+      userid,
       password: hashedPassword,
       created_by: createdBy,
     });

@@ -4,48 +4,34 @@ import Swal from "sweetalert2";
 import withReactContent from "sweetalert2-react-content";
 import LoadingButton from "./LoadingButton";
 import api from "../api/axiosConfig";
+import { getUserFromToken } from "../utils/jwtHelper";
 
 export default function StudentsModal({ isOpen, onClose, examId }) {
   const MySwal = withReactContent(Swal);
   
   const [students, setStudents] = useState([]);
-  const [selectedStudents, setSelectedStudents] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
     total: 0,
   });
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const canSync = getUserFromToken()?.role === "ADMIN";
 
   const fetchStudents = async (page = 1) => {
     if (!examId) return;
     setLoading(true);
 
     try {
-      const [allUsersRes, examUsersRes] = await Promise.all([
-        api.get("/users/role", {
-          params: {
-            role: "SISWA",
-            examId,
-            page,
-            limit: pagination.limit,
-          },
-        }),
-        api.get(`/exams/${examId}/students`),
-      ]);
-
-      setStudents(allUsersRes.data?.data || []);
+      const examUsersRes = await api.get(`/exams/${examId}/students`, { params: { page, limit: pagination.limit } });
+      const enrolled = examUsersRes.data?.data || [];
+      setStudents(enrolled.map((item) => item.student).filter(Boolean));
       setPagination({
-        page: allUsersRes.data?.page || allUsersRes.data?.meta?.page || page,
-        limit: allUsersRes.data?.limit || allUsersRes.data?.meta?.limit || pagination.limit,
-        total: allUsersRes.data?.total || allUsersRes.data?.meta?.total || 0,
+        page,
+        limit: pagination.limit,
+        total: examUsersRes.data?.total || 0,
       });
-      setSelectedStudents(
-        Array.isArray(examUsersRes.data)
-        ? examUsersRes.data.map((item) => item.student_id)
-        : []
-      );
     } catch (err) {
       console.error("Failed to fetch students:", err);
     } finally {
@@ -58,31 +44,23 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, pagination.page]);
 
-  const handleToggle = (id) => {
-    setSelectedStudents((prev) =>
-      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
-    );
-  };
-
-  const handleSave = async () => {
-    if (saving) return;
+  const handleSync = async () => {
+    if (syncing) return;
     try {
-      setSaving(true);
-      await api.post(`/exams/${examId}/students`, { studentIds: selectedStudents });
-
+      setSyncing(true);
+      const { data } = await api.post(`/exams/${examId}/students/sync`);
+      await fetchStudents(1);
       MySwal.fire({
         icon: "success",
         title: "Berhasil!",
-        text: "Data siswa berhasil disimpan.",
+        text: `${data.added} peserta ditambahkan.`,
         timer: 1500,
         showConfirmButton: false,
       });
-      onClose();
     } catch (err) {
-      console.error(err);
-      MySwal.fire("Gagal!", "Data siswa gagal disimpan.", "error");
+      MySwal.fire("Gagal!", err.response?.data?.message || "Peserta gagal disinkronkan.", "error");
     } finally {
-      setSaving(false);
+      setSyncing(false);
     }
   };
 
@@ -116,7 +94,7 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
             >
               <Dialog.Panel className="w-full max-w-3xl transform rounded-2xl bg-white p-6 shadow-lg transition-all">
                 <Dialog.Title className="text-lg font-semibold text-emerald-700">
-                  Assign Students
+                  Daftar Peserta
                 </Dialog.Title>
 
                 <div className="mt-4 max-h-[60vh] overflow-y-auto border rounded-xl">
@@ -127,14 +105,13 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
                         <th className="px-4 py-3 text-center">NIS</th>
                         <th className="px-4 py-3 text-left">Nama</th>
                         <th className="px-4 py-3 text-center">Kelas</th>
-                        <th className="px-4 py-3 text-center">Pilih</th>
                       </tr>
                     </thead>
                     <tbody>
                       {loading ? (
                         <tr>
                           <td
-                            colSpan="5"
+                            colSpan="4"
                             className="text-center py-8 text-gray-500 italic"
                           >
                             Loading data...
@@ -156,20 +133,12 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
                               {student.name}
                             </td>
                             <td className="px-4 py-3 text-center">{student.class_name || "-"}</td>
-                            <td className="px-4 py-3 text-center">
-                              <input
-                                type="checkbox"
-                                className="accent-emerald-600"
-                                checked={selectedStudents.includes(student.id)}
-                                onChange={() => handleToggle(student.id)}
-                              />
-                            </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
                           <td
-                            colSpan="5"
+                            colSpan="4"
                             className="text-center py-8 text-gray-500 italic"
                           >
                             Tidak ada siswa ditemukan
@@ -206,7 +175,7 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
                       onClick={() =>
                         setPagination((prev) => ({
                           ...prev,
-                          page: Math.min(prev.page + 1, totalPages),
+                          page: Math.min(prev.page + 1, Math.max(totalPages, 1)),
                         }))
                       }
                       disabled={pagination.page >= totalPages}
@@ -225,18 +194,18 @@ export default function StudentsModal({ isOpen, onClose, examId }) {
                   <button
                     className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
                     onClick={onClose}
-                    disabled={saving}
+                    disabled={syncing}
                   >
-                    Batal
+                    Tutup
                   </button>
-                  <LoadingButton
+                  {canSync && <LoadingButton
                     className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all"
-                    onClick={handleSave}
-                    loading={saving}
-                    loadingText="Menyimpan..."
+                    onClick={handleSync}
+                    loading={syncing}
+                    loadingText="Menyinkronkan..."
                   >
-                    Simpan
-                  </LoadingButton>
+                    Sinkronkan peserta
+                  </LoadingButton>}
                 </div>
               </Dialog.Panel>
             </Transition.Child>

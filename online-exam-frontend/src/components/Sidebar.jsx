@@ -118,23 +118,18 @@ const Sidebar = ({ children, pageTitle }) => {
         <div className="flex items-center justify-between p-4 mb-2">
           {isOpen || isMobileOpen ? (
             <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <span className="text-white font-bold text-base">A</span>
-              </div>
+              <img src="/img/logo.png" alt="Logo SMK Al Irsyad" className="h-9 w-9 shrink-0 object-contain" />
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-white tracking-tight leading-tight truncate">
-                  Al Irsyad
+                <h3 className="text-xs font-bold text-white tracking-tight leading-tight">
+                  SMK AL IRSYAD CBT
                 </h3>
-                <p className="text-[8px] uppercase tracking-widest text-emerald-400 font-bold">Exam Center</p>
               </div>
               <button onClick={() => setIsMobileOpen(false)} className="lg:hidden text-slate-400 hover:text-white p-1.5">
                 <FaTimes className="text-xs" />
               </button>
             </div>
           ) : (
-            <div className="h-8 w-8 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
-              <span className="text-white font-bold text-base">A</span>
-            </div>
+            <img src="/img/logo.png" alt="Logo SMK Al Irsyad CBT" title="SMK AL IRSYAD CBT" className="h-8 w-8 mx-auto object-contain" />
           )}
         </div>
 

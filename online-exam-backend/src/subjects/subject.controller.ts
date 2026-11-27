@@ -30,12 +30,8 @@ export class SubjectController {
     const createdBy = req.user?.sub;
 
     if (!body.name) throw new BadRequestException('Missing required fields: name');
-    if (!body.class_id) throw new BadRequestException('Missing required fields: class_id');
-
     return await this.subjectService.create({
-      name: body.name,
-      class_id: body.class_id,
-      teacher_id: body.teacher_id,
+      name: String(body.name).trim(),
       description: body.description,
       created_by: createdBy,
     });
@@ -82,7 +78,11 @@ export class SubjectController {
     const subject = await this.subjectService.findById(id);
     if (!subject) throw new NotFoundException(`Subject with ID ${id} not found`);
 
-    return await this.subjectService.update(id, { ...body, updated_by: updatedBy });
+    return await this.subjectService.update(id, {
+      name: body.name,
+      description: body.description,
+      updated_by: updatedBy,
+    });
   }
 
   @Delete(':id')

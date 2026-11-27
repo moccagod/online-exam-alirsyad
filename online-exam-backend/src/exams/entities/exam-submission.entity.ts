@@ -19,17 +19,6 @@ export class ExamSubmission {
   created_by?: string;
   updated_by?: string;
 
-  file_name?: string;
-  file_path?: string;
-  file_url?: string;
-  recording_files?: {
-    file_name: string;
-    file_url: string;
-    size?: number;
-    content_type?: string;
-    uploaded_at?: string;
-  }[];
-
   // Relasi manual (opsional)
   exam?: any;
   student?: any;

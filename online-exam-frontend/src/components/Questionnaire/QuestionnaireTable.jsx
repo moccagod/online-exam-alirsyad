@@ -33,7 +33,7 @@ const QuestionnaireTable = ({ data, onRefresh, searchParams, setSearchParams, on
   return (
     <div className="font-poppins">
       {/* 🔹 Desktop Table View */}
-      <div className="hidden lg:block mt-6 bg-white rounded-2xl shadow-md border border-gray-100 overflow-x-auto">
+      <div className="hidden lg:block mt-6 bg-white rounded-2xl border border-slate-200 overflow-x-auto">
         <table className="min-w-full text-sm text-slate-700 table-fixed">
           <thead className="bg-gradient-to-r from-emerald-50 to-teal-100 text-gray-700">
             <tr className="text-sm font-semibold">
@@ -75,7 +75,7 @@ const QuestionnaireTable = ({ data, onRefresh, searchParams, setSearchParams, on
                 >
                   <td className="px-4 py-3 text-center">{index + 1}</td>
                   <td className="px-4 py-3 text-center">{q.index}</td>
-                  <td className="px-4 py-3 text-gray-800 break-words line-clamp-2">
+                  <td className="px-4 py-3 text-gray-800 break-words align-top">
                     {q.question ? <RichTextRenderer content={q.question} /> : "-"}
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -89,10 +89,11 @@ const QuestionnaireTable = ({ data, onRefresh, searchParams, setSearchParams, on
                       {q.type.replace("_", " ")}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700 break-words">
+                  <td className="px-4 py-3 text-gray-700 break-words align-top">
                     {q.type === "multiple_choice" && Array.isArray(q.options)
                       ? q.options.map((opt, optIndex) => (
-                          <div key={optIndex} className="mb-2 rounded-lg bg-slate-50 p-2">
+                          <div key={optIndex} className="mb-2 flex gap-2 rounded-lg bg-slate-50 p-2">
+                            <span className="font-semibold text-slate-500">{String.fromCharCode(65 + optIndex)}.</span>
                             <RichTextRenderer content={opt.value} />
                           </div>
                         ))
@@ -134,9 +135,9 @@ const QuestionnaireTable = ({ data, onRefresh, searchParams, setSearchParams, on
                     {q.index || index + 1}
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800 leading-tight pr-8 line-clamp-3">
-                      {q.question?.replace(/<[^>]*>/g, "") || "Tanpa Pertanyaan"}
-                    </h4>
+                    <div className="pr-8 font-semibold leading-relaxed text-slate-800">
+                      {q.question ? <RichTextRenderer content={q.question} /> : "Tanpa pertanyaan"}
+                    </div>
                     <div className="flex items-center gap-2 mt-2">
                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
                          q.type === "multiple_choice" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
@@ -155,14 +156,19 @@ const QuestionnaireTable = ({ data, onRefresh, searchParams, setSearchParams, on
                 {q.type === "multiple_choice" && (
                   <div>
                     <p className="text-[9px] uppercase tracking-widest text-slate-400 font-bold mb-1">Opsi</p>
-                    <p className="text-xs text-slate-600 leading-relaxed italic">
-                      {Array.isArray(q.options) ? q.options.map((opt) => opt.value).join(", ") : "-"}
-                    </p>
+                    <div className="space-y-2 text-sm text-slate-700">
+                      {Array.isArray(q.options) ? q.options.map((opt, optionIndex) => (
+                        <div key={optionIndex} className="flex gap-2 rounded-lg bg-slate-50 p-2">
+                          <span className="font-semibold">{String.fromCharCode(65 + optionIndex)}.</span>
+                          <RichTextRenderer content={opt.value} />
+                        </div>
+                      )) : "-"}
+                    </div>
                   </div>
                 )}
                 <div>
                   <p className="text-[9px] uppercase tracking-widest text-slate-400 font-bold mb-1">Jawaban Benar</p>
-                  <p className="text-xs font-bold text-emerald-600">{q.answer || "-"}</p>
+                  <div className="text-sm font-semibold text-emerald-700">{q.answer ? <RichTextRenderer content={q.answer} /> : "-"}</div>
                 </div>
               </div>
             </div>

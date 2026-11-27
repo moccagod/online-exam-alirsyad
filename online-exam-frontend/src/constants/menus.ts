@@ -37,7 +37,7 @@ export const menus = [
   },
   {
     name: 'subject',
-    title: 'Mata Pelajaran',
+    title: 'Mapel & Pengajaran',
     icon: 'FaBook',
     path: '/subjects',
   },

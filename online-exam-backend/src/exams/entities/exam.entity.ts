@@ -19,8 +19,16 @@ export class Exam {
   deleted_by?: string | null;
 
   subject_id: string;
+  assigned_teacher_id?: string | null;
+  package_exam_id?: string | null;
+  category_id?: string | null;
+  category?: { id: string; name: string } | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  token?: string | null;
 
   // Relasi manual (opsional)
   subject?: any;
+  target_classes?: any[];
   questionnaires?: any[];
 }

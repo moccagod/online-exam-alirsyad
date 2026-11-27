@@ -12,8 +12,10 @@ export class Subject {
   deleted_at?: Date;
   deleted_by?: string;
 
-  class_id: string;
+  class_id?: string | null;
   teacher_id?: string;
+  canonical_subject_id?: string | null;
+  assignments?: any[];
 
   // Relasi manual (opsional)
   classes?: any;

@@ -6,6 +6,8 @@ import { ExamSessionService } from './exam-session.service';
 import { TeacherExamsService } from './teacher-exam.service';
 import { ExamSubmissionJobWorker } from './exam-submission-job.worker';
 import { ExamController } from './exam.controller';
+import { ExamCategoryController } from './exam-category.controller';
+import { ExamCategoryService } from './exam-category.service';
 import { ExamSubmissionController } from './exam-submission.controller';
 import { ExamSessionController } from './exam-session.controller';
 import { TeacherExamsController } from './teacher-exam.controller';
@@ -15,6 +17,7 @@ import { SupabaseModule } from '../supabase/supabase.module';
   imports: [SupabaseModule],
   providers: [
     ExamService,
+    ExamCategoryService,
     ExamStudentsService,
     ExamSubmissionService,
     ExamSubmissionJobWorker,
@@ -30,6 +33,7 @@ import { SupabaseModule } from '../supabase/supabase.module';
   ],
   controllers: [
     ExamController,
+    ExamCategoryController,
     ExamSubmissionController,
     ExamSessionController,
     TeacherExamsController,

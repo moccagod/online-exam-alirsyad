@@ -10,6 +10,7 @@ import {
   PlayIcon, 
   EyeIcon, 
   CheckBadgeIcon,
+  ClockIcon,
   ArrowPathIcon,
   TrashIcon 
 } from "@heroicons/react/24/outline";
@@ -26,6 +27,7 @@ export default function ActionMenu({
   onStart,
   onDelete,
   onCancelSubmission,
+  onManageSession,
 }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -107,7 +109,7 @@ export default function ActionMenu({
           >
             <div className="py-1">
               {/* 🔧 Menu umum untuk Edit */}
-              {((menu == "exam" && getUserFromToken()?.role==="ADMIN") ||
+              {((menu == "exam" && ["ADMIN", "GURU"].includes(getUserFromToken()?.role)) ||
                  menu == "user" ||
                  menu == "subjects" ||
                  menu == "questionnaire") &&
@@ -121,12 +123,15 @@ export default function ActionMenu({
               )}
 
               {/* 🔧 Untuk remedial: daftar siswa */}
-              {menu === "exam" && getUserFromToken()?.role==="ADMIN" && (
-                <ActionItem onClick={() => onShowStudents(itemId)} icon={UserGroupIcon} label="Peserta" />
+              {menu === "exam" && ["ADMIN", "GURU"].includes(getUserFromToken()?.role) && (
+                <>
+                  <ActionItem onClick={() => onShowStudents(itemId)} icon={UserGroupIcon} label="Peserta" />
+                  <ActionItem onClick={() => onManageSession(itemId)} icon={ClockIcon} label="Jadwal & Token" />
+                </>
               )}
 
               {/* 🔧 Untuk ujian → buka questionnaire */}
-              {menu === "exam" && (
+              {menu === "exam" && ["ADMIN", "GURU"].includes(getUserFromToken()?.role) && (
                 <ActionItem onClick={handleQuestionnaire} icon={DocumentTextIcon} label="Questionnaire" />
               )}
 
@@ -165,7 +170,7 @@ export default function ActionMenu({
               )}
 
               {/* 🗑️ Hapus (untuk menu yang mendukung) */}
-              {onDelete && (menu!=="exam" || getUserFromToken()?.role==="ADMIN") && (
+              {onDelete && (menu!=="exam" || ["ADMIN", "GURU"].includes(getUserFromToken()?.role)) && (
                 <div className="border-t border-slate-100 my-1">
                   <ActionItem 
                     onClick={() => onDelete(itemId)} 

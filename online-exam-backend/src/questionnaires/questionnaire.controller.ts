@@ -11,6 +11,7 @@ import {
   InternalServerErrorException,
   UseGuards,
   Req,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
@@ -21,6 +22,7 @@ import { QuestionnaireService } from './questionnaire.service';
 import { Questionnaire } from './entities/questionnaire.entity';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { UpdateQuestionnaireDto } from './dto/update-questionnaire.dto';
+import type { Response } from 'express';
 
 @Controller('exams/:examId/questionnaires')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -39,7 +41,7 @@ export class QuestionnaireController {
   }
 
   @Post('import')
-  @UseInterceptors(FileInterceptor('file',{limits:{fileSize:5*1024*1024}}))
+  @UseInterceptors(FileInterceptor('file',{limits:{fileSize:20*1024*1024}}))
   import(@Param('examId') id: string, @UploadedFile() file: Express.Multer.File, @Query('save') save: string, @Req() req: any) {
     if (!file?.originalname.toLowerCase().endsWith('.xlsx')) throw new BadRequestException('Pilih berkas .xlsx');
     return this.questionnaireService.importWorkbook(id,req.user,file.buffer,save==='1');
@@ -128,5 +130,19 @@ export class QuestionnaireController {
     const userId = req.user?.sub;
 
     return this.questionnaireService.softDelete(id, userId, req.user);
+  }
+}
+
+@Controller('question-images')
+@UseGuards(AuthGuard('jwt'))
+export class QuestionImageController {
+  constructor(private readonly questionnaireService: QuestionnaireService) {}
+
+  @Get(':questionId/:name')
+  async read(@Param('questionId') questionId: string, @Param('name') name: string, @Req() req: any, @Res() response: Response) {
+    const image = await this.questionnaireService.readImportedImage(questionId,name,req.user);
+    response.setHeader('Content-Type',image.contentType);
+    response.setHeader('Cache-Control','private, max-age=300');
+    response.send(image.buffer);
   }
 }

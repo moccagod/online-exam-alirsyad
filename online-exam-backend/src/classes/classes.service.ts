@@ -61,13 +61,34 @@ export class ClassesService {
 
     const { data: existing, error: checkError } = await this.supabase
       .from('classes')
-      .select('id')
+      .select('id, deleted_at')
       .eq('id', id)
-      .is('deleted_at', null)
       .maybeSingle();
 
     if (checkError) throw new InternalServerErrorException(checkError.message);
-    if (existing) throw new BadRequestException(`Kelas ${id} sudah ada`);
+    if (existing && !existing.deleted_at) {
+      throw new BadRequestException(`Kelas ${id} sudah ada`);
+    }
+
+    if (existing) {
+      const { data, error } = await this.supabase
+        .from('classes')
+        .update({
+          name,
+          grade,
+          deleted_at: null,
+          deleted_by: null,
+          updated_at: new Date(),
+          updated_by: createdBy,
+        })
+        .eq('id', id)
+        .not('deleted_at', 'is', null)
+        .select()
+        .single();
+
+      if (error) throw new InternalServerErrorException(error.message);
+      return data;
+    }
 
     const { data, error } = await this.supabase
       .from('classes')

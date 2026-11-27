@@ -7,10 +7,12 @@ import type { Exam } from './entities/exam.entity';
 import type { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { CreateExamDto } from './dto/create-exam.dto';
 import { UpdateExamDto } from './dto/update-exam.dto';
+import { ExamStudentsService } from './exam-student.service';
+import { ExamCategoryService } from './exam-category.service';
 
 @Injectable()
 export class ExamService {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(private readonly supabase: SupabaseClient, private readonly examStudents: ExamStudentsService, private readonly categories: ExamCategoryService) {}
 
   async recalculate(id: string, operator: string, expected?: any[]) {
     const [history, result, archive, weights] = await Promise.all([
@@ -62,7 +64,7 @@ export class ExamService {
 
   async schedule(id: string, body: any) {
     if (!(Date.parse(body.ends_at) > Date.parse(body.starts_at))) throw new BadRequestException('Periksa jam mulai dan selesai');
-    const token = randomBytes(6).toString('hex').toUpperCase();
+    const token = randomBytes(3).toString('hex').slice(0, 5).toUpperCase();
     const {error} = await this.supabase.rpc('exam_schedule',{p_exam:id,p_open:body.starts_at,p_close:body.ends_at,p_token:token});
     if (error) throw new BadRequestException(error.message);
     return {token};
@@ -80,13 +82,6 @@ export class ExamService {
     const raw = String(date ?? '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T00:00:00`;
     return raw;
-  }
-
-  private normalizeClassIdentifier(value: unknown): string {
-    return String(value ?? '')
-      .trim()
-      .toUpperCase()
-      .replace(/[\s_-]+/g, '');
   }
 
   private getDatePart(value: unknown): string {
@@ -183,7 +178,7 @@ export class ExamService {
   private async getExamWithSubject(examId: string) {
     const { data, error } = await this.supabase
       .from('exams')
-      .select('*, subject:subjects(id,name,class_id,teacher_id)')
+      .select('*, category:exam_categories(id,name), subject:subjects(id,name,class_id,teacher_id),target_classes:exam_target_classes(id,class_id,class:classes(id,name,grade))')
       .eq('id', examId)
       .is('deleted_at', null)
       .single();
@@ -215,6 +210,8 @@ export class ExamService {
   }
 
   async create(dto: CreateExamDto, user?: any): Promise<Exam> {
+    if (!dto.category_id) throw new BadRequestException('Kategori ujian wajib dipilih.');
+    await this.categories.assertExists(dto.category_id);
     // Supabase row type untuk tabel exams
     type ExamRow = {
       id?: string;
@@ -227,29 +224,57 @@ export class ExamService {
       essay_weight: number;
       notes?: string | null;
       created_by: string;
+      assigned_teacher_id?: string;
+      package_exam_id?: string | null;
+      category_id: string;
       deleted_at?: string | null;
       deleted_by?: string | null;
     };
 
-    if (this.getRole(user) === 'GURU') {
-      const { data: subject, error: subjectError } = await this.supabase
-        .from('subjects')
-        .select('id, teacher_id')
-        .eq('id', dto.subject_id)
-        .is('deleted_at', null)
-        .single();
+    const role = this.getRole(user);
+    const teacherId = role === 'GURU' ? user?.sub : String(dto.teacher_id || '').trim();
+    const classIds = Array.from(new Set((dto.class_ids || []).map(String).filter(Boolean)));
+    if (!teacherId) throw new BadRequestException('Guru pengampu wajib dipilih.');
+    if (classIds.length === 0) throw new BadRequestException('Pilih minimal satu kelas ujian.');
 
-      if (subjectError || !subject) throw new NotFoundException('Mata pelajaran tidak ditemukan');
-      if (subject.teacher_id !== user?.sub) {
-        throw new ForbiddenException('Guru hanya dapat membuat ujian untuk mata pelajaran yang diampu');
+    const { data: subject, error: subjectError } = await this.supabase
+      .from('subjects').select('id').eq('id', dto.subject_id).is('deleted_at', null).maybeSingle();
+    if (subjectError || !subject) throw new NotFoundException('Mata pelajaran tidak ditemukan');
+
+    const { data: assignments, error: assignmentError } = await this.supabase
+      .from('teaching_assignments')
+      .select('class_id')
+      .eq('teacher_id', teacherId)
+      .eq('subject_id', dto.subject_id)
+      .is('deleted_at', null);
+    if (assignmentError) throw new InternalServerErrorException(assignmentError.message);
+    const allowedClasses = new Set((assignments || []).map((item) => String(item.class_id)));
+    const denied = classIds.filter((classId) => !allowedClasses.has(classId));
+    if (denied.length > 0) {
+      throw new ForbiddenException('Kelas yang dipilih tidak termasuk penugasan guru untuk mapel ini.');
+    }
+
+    if (dto.package_exam_id) {
+      const { data: source } = await this.supabase.from('exams')
+        .select('id,subject_id,assigned_teacher_id').eq('id', dto.package_exam_id)
+        .is('deleted_at', null).maybeSingle();
+      if (!source || source.subject_id !== dto.subject_id || source.assigned_teacher_id !== teacherId) {
+        throw new BadRequestException('Paket soal tidak sesuai dengan mapel dan guru sesi.');
       }
     }
 
     const payload = {
-      ...dto,
+      title: dto.title,
+      subject_id: dto.subject_id,
+      type: dto.type,
+      duration: dto.duration,
+      created_by: dto.created_by,
       date: this.normalizeExamDate(dto.date),
       ...this.normalizeScoreWeights(dto.multiple_choice_weight, dto.essay_weight),
       notes: dto.notes ?? null,
+      assigned_teacher_id: teacherId,
+      package_exam_id: dto.package_exam_id || null,
+      category_id: dto.category_id,
     } as ExamRow;
 
     const { data, error } = await this.supabase
@@ -271,13 +296,32 @@ export class ExamService {
         .single();
 
       if (fallbackError) throw new InternalServerErrorException(fallbackError.message);
-      return fallbackData;
+      await this.createTargetsAndParticipants(fallbackData.id, classIds, dto.created_by);
+      return this.getExamWithSubject(fallbackData.id);
     }
 
     throw new InternalServerErrorException(error.message);
   }
-  return data;
+  await this.createTargetsAndParticipants(data.id, classIds, dto.created_by);
+  return this.getExamWithSubject(data.id);
 }
+
+  private async createTargetsAndParticipants(examId: string, classIds: string[], createdBy: string) {
+    const { error: targetError } = await this.supabase.from('exam_target_classes').insert(
+      classIds.map((classId) => ({ exam_id: examId, class_id: classId, created_by: createdBy })),
+    );
+    if (targetError) {
+      await this.supabase.from('exams').delete().eq('id', examId);
+      throw new InternalServerErrorException(targetError.message);
+    }
+
+    try {
+      await this.examStudents.enrollClassStudents(examId, classIds, createdBy);
+    } catch (error) {
+      await this.supabase.from('exams').delete().eq('id', examId);
+      throw error;
+    }
+  }
 
 
   async getDataWithPagination(
@@ -287,13 +331,21 @@ export class ExamService {
     page: number,
     limit: number,
     user?: any,
+    categoryId = '',
   ): Promise<{ data: Exam[]; meta: { total: number; page: number; limit: number; totalPages: number } }> {
     const offset = (page - 1) * limit;
 
     let query = this.supabase
       .from('exams')
-      .select('*, subject:subjects(id,name,class_id,teacher_id)', { count: 'exact' })
+      .select('*, category:exam_categories(id,name), subject:subjects(id,name,class_id,teacher_id),target_classes:exam_target_classes(id,class_id,class:classes(id,name,grade))', { count: 'exact' })
       .is('deleted_at', null);
+
+    if (categoryId === 'uncategorized') {
+      query = query.is('category_id', null);
+    } else if (categoryId) {
+      await this.categories.assertExists(categoryId);
+      query = query.eq('category_id', categoryId);
+    }
 
     if (search.trim()) {
       query = query.or(`title.ilike.%${search}%,type.ilike.%${search}%`);
@@ -317,8 +369,20 @@ export class ExamService {
 
     if (error) throw new InternalServerErrorException(error.message);
 
+    let examRows = data || [];
+    if (this.getRole(user) === 'ADMIN' && examRows.length > 0) {
+      const { data: deliveries, error: deliveryError } = await this.supabase
+        .from('exam_delivery')
+        .select('exam_id,token')
+        .in('exam_id', examRows.map((exam) => exam.id));
+      if (deliveryError) throw new InternalServerErrorException(deliveryError.message);
+
+      const tokens = new Map((deliveries || []).map((delivery) => [delivery.exam_id, delivery.token]));
+      examRows = examRows.map((exam) => ({ ...exam, token: tokens.get(exam.id) ?? null }));
+    }
+
     return {
-      data: data || [],
+      data: examRows,
       meta: {
         total: count ?? 0,
         page,
@@ -350,18 +414,13 @@ export class ExamService {
     // Ambil dulu row lama
     const oldData = await this.assertCanAccessExam(id, user);
 
-    if (this.getRole(user) === 'GURU' && dto.subject_id && dto.subject_id !== oldData.subject_id) {
-      const { data: subject, error: subjectError } = await this.supabase
-        .from('subjects')
-        .select('id, teacher_id')
-        .eq('id', dto.subject_id)
-        .is('deleted_at', null)
-        .single();
+    if (dto.category_id !== undefined) {
+      if (!dto.category_id) throw new BadRequestException('Kategori ujian wajib dipilih.');
+      await this.categories.assertExists(dto.category_id);
+    }
 
-      if (subjectError || !subject) throw new NotFoundException('Mata pelajaran tidak ditemukan');
-      if (subject.teacher_id !== user?.sub) {
-        throw new ForbiddenException('Guru hanya dapat memilih mata pelajaran yang diampu');
-      }
+    if (this.getRole(user) === 'GURU' && dto.subject_id && dto.subject_id !== oldData.subject_id) {
+      throw new BadRequestException('Mapel sesi tidak dapat diganti. Buat sesi baru.');
     }
 
     const scoreWeights = this.normalizeScoreWeights(
@@ -381,6 +440,7 @@ export class ExamService {
       ...scoreWeights,
       notes: dto.notes ?? oldData.notes ?? null,
       date: dto.date ? this.normalizeExamDate(dto.date) : oldData.date,
+      category_id: dto.category_id ?? oldData.category_id ?? null,
       updated_by: (dto as any).updated_by ?? oldData.updated_by ?? null,
       updated_at: new Date(),
     };

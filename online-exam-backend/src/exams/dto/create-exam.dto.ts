@@ -1,5 +1,5 @@
 // create-exam.dto.ts
-import { IsString, IsDateString, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsString, IsDateString, IsInt, IsOptional, Max, Min, IsArray } from 'class-validator';
 
 export class CreateExamDto {
   @IsString()
@@ -35,4 +35,20 @@ export class CreateExamDto {
 
   @IsString()
   created_by: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  class_ids?: string[];
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  package_exam_id?: string;
+
+  @IsString()
+  category_id: string;
 }

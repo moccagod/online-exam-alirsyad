@@ -137,7 +137,15 @@ export class ReportsService {
 
   private normalizeSubmissionRow(row: any) {
     const exam = this.firstRelation(row?.exams);
-    const subject = this.firstRelation(exam?.subjects);
+    const rawSubject = this.firstRelation(exam?.subjects);
+    const targetNames = (exam?.target_classes || []).map((target: any) => {
+      const classRow = this.firstRelation(target.class);
+      return classRow?.name || target.class_id;
+    }).filter(Boolean);
+    const subject = rawSubject ? {
+      ...rawSubject,
+      class_id: targetNames.join(', ') || rawSubject.class_id,
+    } : rawSubject;
 
     return {
       ...row,
@@ -153,8 +161,10 @@ export class ReportsService {
 
   private async getAllowedSubjectIds(user?: any) {
     if (String(user?.role || '').toUpperCase() !== 'GURU') return null;
-
-    return (await assignedExams(this.supabase,user.sub)).map(e=>e.subject_id);
+    const { data, error } = await this.supabase.from('teaching_assignments')
+      .select('subject_id').eq('teacher_id', user.sub).is('deleted_at', null);
+    if (error) throw new InternalServerErrorException(error.message);
+    return Array.from(new Set((data || []).map((row) => row.subject_id)));
   }
 
   private async getReportSubjects(filter: ReportFilter, user?: any) {
@@ -164,22 +174,31 @@ export class ReportsService {
 
     let query = this.supabase
       .from('subjects')
-      .select('id,name,class_id,teacher_id')
-      .is('deleted_at', null);
+      .select('id,name,class_id,teacher_id,assignments:teaching_assignments!subject_id(class_id,deleted_at,class:classes(id,name))')
+      .is('deleted_at', null)
+      .is('canonical_subject_id', null);
 
     if (filter.subjectId) query = query.eq('id', filter.subjectId);
     if (allowedSubjectIds) query = query.in('id', allowedSubjectIds);
 
     const { data, error } = await query.order('name', { ascending: true });
     if (error) throw new InternalServerErrorException(error.message);
-    return data || [];
+    return (data || []).map((subject: any) => {
+      const classNames = (subject.assignments || []).filter((assignment: any) => !assignment.deleted_at)
+        .map((assignment: any) => this.firstRelation(assignment.class)?.name || assignment.class_id)
+        .filter(Boolean);
+      return { ...subject, class_id: Array.from(new Set(classNames)).join(', ') || subject.class_id };
+    });
   }
 
   private async getReportStudents(filter: ReportFilter, user?: any) {
     const subjects = await this.getReportSubjects(filter, user);
-    const allowedClasses = new Set(
-      subjects.map((subject: any) => this.normalizeClassIdentifier(subject.class_id)).filter(Boolean),
-    );
+    let assignmentQuery = this.supabase.from('teaching_assignments').select('class_id')
+      .is('deleted_at', null).in('subject_id', subjects.map((subject: any) => subject.id));
+    if (String(user?.role || '').toUpperCase() === 'GURU') assignmentQuery = assignmentQuery.eq('teacher_id', user.sub);
+    const { data: assignmentRows, error: assignmentError } = subjects.length ? await assignmentQuery : { data: [], error: null };
+    if (assignmentError) throw new InternalServerErrorException(assignmentError.message);
+    const allowedClasses = new Set((assignmentRows || []).map((row: any) => this.normalizeClassIdentifier(row.class_id)).filter(Boolean));
 
     const { data, error } = await this.supabase
       .from('users')
@@ -221,7 +240,8 @@ export class ReportsService {
           id,
           name,
           class_id
-        )
+        ),
+        target_classes:exam_target_classes(class_id,class:classes(id,name))
       `,
     ).is('deleted_at', null);
 
@@ -234,10 +254,11 @@ export class ReportsService {
     const { data, error } = await query.order('date', { ascending: false });
     if (error) throw new InternalServerErrorException(error.message);
 
-    return (data || []).map((row: any) => ({
-      ...row,
-      subjects: this.firstRelation(row.subjects),
-    }));
+    return (data || []).map((row: any) => {
+      const subject = this.firstRelation(row.subjects);
+      const classNames = (row.target_classes || []).map((target: any) => this.firstRelation(target.class)?.name || target.class_id).filter(Boolean);
+      return { ...row, subjects: subject ? { ...subject, class_id: classNames.join(', ') || subject.class_id } : subject };
+    });
   }
 
   private async getSubmittedRowsByExamIds(examIds: string[]) {
@@ -263,7 +284,8 @@ export class ReportsService {
             id,
             name,
             class_id
-          )
+          ),
+          target_classes:exam_target_classes(class_id,class:classes(id,name))
         )
       `,
     ).in('exam_id', examIds);
@@ -330,7 +352,8 @@ export class ReportsService {
               id,
               name,
               class_id
-            )
+            ),
+            target_classes:exam_target_classes(class_id,class:classes(id,name))
           )
         `,
       );

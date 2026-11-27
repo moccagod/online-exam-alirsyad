@@ -19,11 +19,15 @@ const uuid = require('crypto').randomUUID;
   await migration('1768000000000-ensure-exam-sessions-columns');
   await migration('1768100000000-add-exam-score-weights');
   await db.exec(
+    'create table classes(id varchar(100) primary key,name varchar(100) not null,grade int,created_at timestamptz default now(),created_by uuid,updated_at timestamptz,updated_by uuid,deleted_at timestamptz,deleted_by uuid);',
+  );
+  await db.exec(
     'alter table exam_submissions add column session_id uuid,add column created_by uuid,add column updated_at timestamp,add column updated_by uuid;create unique index uq_result on exam_submissions(exam_id,student_id)',
   );
   await migration('1768300000000-create-exam-submission-jobs');
   await migration('1795000000000-ExamAccounts');
   await migration('1795000001000-ExamDelivery');
+  await migration('1795000004000-ReviewExamViolations');
   const teacher = uuid(),
     course = uuid(),
     otherCourse = uuid(),
@@ -33,17 +37,18 @@ const uuid = require('crypto').randomUUID;
     students = [uuid(), uuid(), uuid()];
   for (const id of [teacher, ...students])
     await query(
-      "insert into users(id,name,userid,role,class_name,nisn,gender,description,created_by) values($1::uuid,'test',$1::uuid::text,'SISWA','AK','','L','','test')",
-      [id],
+      "insert into users(id,name,userid,role,class_name,nisn,gender,description,created_by) values($1::uuid,'test',$1::uuid::text,$2,'AK','','L','','test')",
+      [id, id === teacher ? 'GURU' : 'SISWA'],
     );
   await query(
-    "insert into subjects(id,name,class_id,created_by) values($1,'TIK','AK','test')",
-    [course],
+    "insert into subjects(id,name,class_id,teacher_id,created_by) values($1,'TIK','AK',$2,'test')",
+    [course, teacher],
   );
   await query(
-    "insert into subjects(id,name,class_id,created_by) values($1,'TIK','TKJ','test')",
-    [otherCourse],
+    "insert into subjects(id,name,class_id,teacher_id,created_by) values($1,'TIK','TKJ',$2,'test')",
+    [otherCourse, teacher],
   );
+  await query("insert into classes(id,name,grade) values('AK','10 AK',10),('TKJ','10 TKJ',10)");
   for (const id of [exam, next]) {
     await query(
       "insert into exams(id,title,date,type,duration,subject_id,created_by) values($1,'test',now(),'REGULER',90,$2,'test')",
@@ -60,6 +65,11 @@ const uuid = require('crypto').randomUUID;
     [q, exam],
   );
   await query('update exams set package_exam_id=$1 where id=$2', [exam, next]);
+  await migration('1795000002000-AcademicAssignments');
+  assert.equal((await query('select count(*)::int total from teaching_assignments'))[0].total, 2);
+  assert.equal((await query('select count(*)::int total from subjects where canonical_subject_id is not null'))[0].total, 1);
+  assert.equal((await query('select count(distinct subject_id)::int total from teaching_assignments'))[0].total, 1);
+  assert.equal((await query('select count(*)::int total from exam_target_classes'))[0].total, 2);
   const prep = async (e, st, token, start = false) =>
     (
       await query('select exam_prepare($1,$2,$3,$4) data', [
@@ -131,9 +141,9 @@ const uuid = require('crypto').randomUUID;
   assert.equal((await prep(exam, st, '')).draft[q], 'A');
   for (const e of ['one', 'one', 'two', 'three'])
     await act(sid, st, 'violation', { event: e });
-  await assert.rejects(act(sid, st, 'draft', { revision: 3, draft: {} }));
-  await act(sid, st, 'unlock');
-  assert.equal((await prep(exam, st, '')).tab_switch_count, 0);
+  assert.equal((await prep(exam, st, '')).tab_switch_count, 3);
+  assert.equal((await query('select status from exam_sessions where id=$1', [sid]))[0].status, 'started');
+  await act(sid, st, 'draft', { revision: 3, draft: { [q]: 'A' } });
   await assert.rejects(act(sid, teacher, 'submit', { revision: 2, draft: {} }));
   const receipts = await Promise.all(
     Array.from({ length: 20 }, () =>
@@ -196,8 +206,14 @@ const uuid = require('crypto').randomUUID;
     ).totalScore,
     null,
   );
+  await db.exec('create schema storage; create table storage.buckets(id text primary key);');
+  await db.exec("insert into storage.buckets(id) values('exam-recordings');");
+  await assert.rejects(migration('1795000005000-RemoveExamRecordingColumns'));
+  await db.exec("delete from storage.buckets where id='exam-recordings';");
+  await migration('1795000005000-RemoveExamRecordingColumns');
+  assert.equal((await query("select count(*)::int total from information_schema.columns where table_name='exam_submissions' and column_name in ('file_name','file_path','file_url','recording_files')"))[0].total, 0);
   console.log(
-    'Synthetic migrations, access window, shared package, revision ordering, lock, duplicate submissions, expiry and grading passed',
+    'Synthetic migrations, access window, shared package, revision ordering, violation review, recording columns, duplicate submissions, expiry and grading passed',
   );
   await db.close();
   const XLSX = require('xlsx');

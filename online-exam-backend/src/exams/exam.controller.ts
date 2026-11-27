@@ -33,7 +33,7 @@ export class ExamController {
   }
 
   @Post()
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.GURU)
   async create(@Body() body: any, @Req() req: any) {
     const createdBy = req.user?.sub;
 
@@ -60,9 +60,10 @@ export class ExamController {
     @Query('order') order: 'asc' | 'desc' = 'asc',
     @Query('page') page = '1',
     @Query('limit') limit = '10',
+    @Query('categoryId') categoryId = '',
     @Req() req: any,
   ) {
-    return this.examService.getDataWithPagination(search, sort, order, Number(page), Number(limit), req.user);
+    return this.examService.getDataWithPagination(search, sort, order, Number(page), Number(limit), req.user, categoryId);
   }
 
   @Get('today')
@@ -101,8 +102,9 @@ export class ExamController {
   }
 
   @Get(':id/control')
-  @Roles(Role.ADMIN)
-  control(@Param('id') id: string) {
+  @Roles(Role.ADMIN, Role.GURU)
+  async control(@Param('id') id: string, @Req() req: any) {
+    await this.examService.assertCanAccessExam(id, req.user);
     return this.examService.control(id);
   }
 
@@ -113,14 +115,16 @@ export class ExamController {
   }
 
   @Post(':id/control')
-  @Roles(Role.ADMIN)
-  schedule(@Param('id') id: string, @Body() body: any) {
+  @Roles(Role.ADMIN, Role.GURU)
+  async schedule(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    await this.examService.assertCanAccessExam(id, req.user);
     return this.examService.schedule(id, body);
   }
 
   @Post(':id/unlock')
-  @Roles(Role.ADMIN)
-  unlock(@Param('id') id: string, @Body('session') session: string) {
+  @Roles(Role.ADMIN, Role.GURU)
+  async unlock(@Param('id') id: string, @Body('session') session: string, @Req() req: any) {
+    await this.examService.assertCanAccessExam(id, req.user);
     return this.examService.unlock(id, session);
   }
 
@@ -138,7 +142,7 @@ export class ExamController {
   }
 
   @Put(':id')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.GURU)
   async update(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
     return this.examService.update(id, {
       ...dto,
@@ -149,21 +153,35 @@ export class ExamController {
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.GURU)
   async softDelete(@Param('id') id: string, @Req() req: any) {
     return this.examService.softDelete(id, req.user?.sub, req.user);
   }
 
   @Get(':id/students')
   @Roles(Role.ADMIN, Role.GURU)
-  async getStudents(@Param('id') examId: string, @Req() req: any) {
+  async getStudents(@Param('id') examId: string, @Req() req: any, @Query('page') page?: string, @Query('limit') limit?: string) {
     await this.examService.assertCanAccessExam(examId, req.user);
-    return this.examStudentsService.getExamStudents(examId);
+    if (page === undefined) return this.examStudentsService.getExamStudents(examId);
+    const pageNumber = Number(page);
+    const pageLimit = limit === undefined ? 10 : Number(limit);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || !Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 100) {
+      throw new BadRequestException('Parameter halaman peserta tidak valid.');
+    }
+    return this.examStudentsService.getExamStudents(examId, pageNumber, pageLimit);
+  }
+
+  @Post(':id/students/sync')
+  @Roles(Role.ADMIN)
+  async syncStudents(@Param('id') examId: string, @Req() req: any) {
+    await this.examService.assertCanAccessExam(examId, req.user);
+    return this.examStudentsService.syncClassStudents(examId, req.user?.sub);
   }
 
   @Post(':id/students')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.GURU)
   async assignStudents(@Param('id') examId: string, @Body('studentIds') studentIds: string[], @Req() req: any) {
+    await this.examService.assertCanAccessExam(examId, req.user);
     const createdBy = req.user?.sub;
     return this.examStudentsService.assignStudents(examId, studentIds, createdBy);
   }

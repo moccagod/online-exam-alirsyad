@@ -49,6 +49,7 @@ const Users = () => {
   const [editSiswaModalOpen, setEditSiswaModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [updating, setUpdating] = useState(false);
   const [updatingSiswa, setUpdatingSiswa] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -103,20 +104,25 @@ const Users = () => {
   // Submit user
   const handleSubmit = async () => {
     if (saving) return;
-    if (!formData.userid || !formData.name || !formData.role) {
-      MySwal.fire("Gagal!", "Silakan lengkapi isian wajib (NIK/NIS, Nama, dan Role)!", "error");
+    if (!formData.userid.trim() || !formData.name.trim() || !formData.role) {
+      setCreateError("Silakan lengkapi isian wajib (NIK/NIS, Nama, dan Role)!");
+      return;
+    }
+    if (!formData.gender) {
+      setCreateError("Silakan pilih jenis kelamin.");
       return;
     }
 
     try {
       setSaving(true);
+      setCreateError("");
       await api.post("/users", formData);
       setShowModal(false);
       resetForm();
       MySwal.fire("Berhasil!", "User berhasil ditambahkan.", "success");
       fetchUsers();
     } catch (err) {
-      MySwal.fire("Gagal!", "Gagal menambah user.", "error");
+      setCreateError(err.userMessage || "Gagal menambah user.");
     } finally {
       setSaving(false);
     }
@@ -319,7 +325,7 @@ const Users = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Kelas</label>
                 <ClassSelect
-                  classes={formData.class_id}
+                  classes={formData.class_id || formData.class_name}
                   setClasses={(v, name) =>
                     setFormData((p) => ({ ...p, class_id: v, class_name: name }))
                   }
@@ -357,6 +363,10 @@ const Users = () => {
                   />
                 </div>
               </div>
+
+              {createError && (
+                <p role="alert" className="mt-4 text-sm text-red-700">{createError}</p>
+              )}
 
               <div className="mt-6 flex justify-end space-x-2">
                 <button onClick={() => { setShowModal(false); resetForm(); }} className="px-4 py-2 bg-gray-200 rounded-lg">
@@ -415,7 +425,7 @@ const Users = () => {
                   setRole={(v) => setFormData((p) => ({ ...p, role: v }))}
                 />
                 <ClassSelect
-                  classes={formData.class_id}
+                  classes={formData.class_id || formData.class_name}
                   setClasses={(v, name) =>
                     setFormData((p) => ({ ...p, class_id: v, class_name: name }))
                   }
@@ -506,7 +516,7 @@ const Users = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Kelas</label>
                   <ClassSelect
-                    classes={formData.class_id}
+                    classes={formData.class_id || formData.class_name}
                     setClasses={(v, name) =>
                       setFormData((p) => ({ ...p, class_id: v, class_name: name }))
                     }
@@ -788,6 +798,7 @@ const Users = () => {
             <button
               onClick={() => {
                 resetForm();
+                setCreateError("");
                 setShowModal(true);
               }}
               className="module-action-btn bg-emerald-600 hover:bg-emerald-700 text-white transition-colors duration-200"
