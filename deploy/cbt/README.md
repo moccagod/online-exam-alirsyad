@@ -9,7 +9,7 @@ Instalasi ini memakai `/var/www/online-exam-cbt`, PM2 `online-exam-cbt-backend`,
 3. Jalankan `npm ci` dan `npm run build` di backend. Jalankan `npm ci` dan `VITE_API_BASE_URL=/api npm run build` di frontend.
 4. Jalankan backend sebagai proses PM2 baru dari direktori backend CBT: `pm2 start dist/src/main.js --name online-exam-cbt-backend --cwd /var/www/online-exam-cbt/online-exam-backend`. Periksa log dan port `3001`.
 5. Salin `nginx-testing.conf` ke `/etc/nginx/sites-available/online-exam-cbt`, buat symlink di `sites-enabled`, jalankan `nginx -t`, lalu `systemctl reload nginx`.
-6. Dari komputer penguji, jalankan `ssh -N -L 8081:127.0.0.1:8081 root@<IP_VPS>` lalu buka `http://localhost:8081`. Pastikan situs lama tetap merespons.
+6. Dari PowerShell komputer penguji, jalankan `& 'C:\Windows\System32\OpenSSH\ssh.exe' -N -L 127.0.0.1:8081:127.0.0.1:8081 root@72.62.124.232` lalu buka `http://localhost:8081`. Biarkan jendela PowerShell tersebut terbuka selama pengujian dan tekan `Ctrl+C` untuk menutup tunnel. Pastikan situs lama tetap merespons.
 
 ## Setelah domain tersedia
 
